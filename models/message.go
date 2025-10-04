@@ -52,3 +52,15 @@ type MessagePreviewResponse struct {
 	Content   string             `json:"content"`
 	CreatedAt time.Time          `json:"created_at"`
 }
+
+type WSMessage struct {
+	Type    string `json:"type"`
+	Payload any    `json:"payload,omitempty"`
+}
+
+type WSResponse struct {
+	Type    string `json:"type"`
+	Success bool   `json:"success"`
+	Message string `json:"message,omitempty"`
+	Data    any    `json:"data,omitempty"`
+}

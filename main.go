@@ -20,6 +20,8 @@ func main() {
 	cfg := config.Load()
 
 	mongoService := services.NewMongoService(cfg.MongoURI)
+	authService := services.NewAuthService(mongoService)
+	chatService := services.NewChatService(mongoService)
 
 	if err := mongoService.Connect(); err != nil {
 		log.Fatal("Error connecting to MongoDB: ", err)
@@ -32,7 +34,9 @@ func main() {
 
 	router := gin.Default()
 
-	authHandler := handlers.NewAuthHandler(mongoService, cfg)
+	authHandler := handlers.NewAuthHandler(authService, cfg)
+	chatHandler := handlers.NewChatHandler(chatService, cfg)
+	roomHandler := handlers.NewRoomHandler(mongoService, authService)
 
 	auth := router.Group("/api/auth")
 	{
@@ -44,7 +48,18 @@ func main() {
 	api.Use(middleware.AuthMiddleware())
 	{
 		api.GET("/profile", authHandler.Profile)
+
+		api.GET("/rooms", roomHandler.GetRooms)
+		api.POST("/rooms", roomHandler.CreateRoom)
+		api.GET("/rooms/:id", roomHandler.GetRoom)
+		api.GET("/direct/:username", roomHandler.GetDirectRoom)
+		api.POST("/rooms/:id/join", roomHandler.JoinRoom)
+		api.POST("/rooms/:id/leave", roomHandler.LeaveRoom)
+		api.GET("/rooms/:id/messages", roomHandler.GetMessages)
+		api.GET("/direct/:username/messages", roomHandler.GetDirectMessages)
 	}
+
+	api.GET("/api/ws", chatHandler.HandleWebsocket)
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})

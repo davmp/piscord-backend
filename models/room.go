@@ -23,7 +23,7 @@ type Room struct {
 
 type CreateRoomRequest struct {
 	Name           string   `json:"name" binding:"required,min=1,max=50"`
-	Info           string   `json:"info,omitempty"`
+	Description    string   `json:"description,omitempty"`
 	Type           string   `json:"type" binding:"required,oneof=group direct"`
 	MaxMembers     int      `json:"max_members,omitempty"`
 	ParticipantIDs []string `json:"participant_ids,omitempty"`
@@ -32,6 +32,7 @@ type CreateRoomRequest struct {
 type RoomResponse struct {
 	ID          primitive.ObjectID `json:"id"`
 	Name        string             `json:"name"`
+	Description string             `json:"description,omitempty"`
 	Type        string             `json:"type"`
 	CreatedBy   primitive.ObjectID `json:"created_by"`
 	MemberCount int                `json:"member_count"`
@@ -41,7 +42,6 @@ type RoomResponse struct {
 	UpdatedAt   time.Time          `json:"updated_at"`
 
 	DisplayName string `json:"display_name"`
-	Info        string `json:"info,omitempty"`
 	Avatar      string `json:"avatar,omitempty"`
 }
 

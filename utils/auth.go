@@ -11,6 +11,7 @@ import (
 type Claims struct {
 	UserID   string `json:"user_id"`
 	Username string `json:"username"`
+	Picture  string `json:"picture"`
 	jwt.RegisteredClaims
 }
 
@@ -24,10 +25,11 @@ func CheckPasswordHash(password, hash string) bool {
 	return err == nil
 }
 
-func GenerateJWT(userID, username, secret string) (string, error) {
+func GenerateJWT(userID, username, picture, secret string) (string, error) {
 	claims := &Claims{
 		UserID:   userID,
 		Username: username,
+		Picture:  picture,
 		RegisteredClaims: jwt.RegisteredClaims{
 			ExpiresAt: jwt.NewNumericDate(time.Now().Add(24 * time.Hour)),
 			IssuedAt:  jwt.NewNumericDate(time.Now()),

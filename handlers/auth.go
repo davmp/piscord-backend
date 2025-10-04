@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"context"
 	"net/http"
 	"time"
 
@@ -12,19 +11,18 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson/primitive"
-	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type AuthHandler struct {
-	MongoService *services.MongoService
-	Config       *config.Config
+	AuthService *services.AuthService
+	Config      *config.Config
 }
 
-func NewAuthHandler(mongoService *services.MongoService, config *config.Config) *AuthHandler {
+func NewAuthHandler(authService *services.AuthService, config *config.Config) *AuthHandler {
 	return &AuthHandler{
-		MongoService: mongoService,
-		Config:       config,
+		AuthService: authService,
+		Config:      config,
 	}
 }
 
@@ -35,14 +33,7 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	usersCollection := h.MongoService.GetCollection("users")
-	var existingUser models.User
-	err := usersCollection.FindOne(context.Background(), bson.M{
-		"$or": []bson.M{
-			{"username": req.Username},
-		},
-	}).Decode(&existingUser)
-
+	_, err := h.AuthService.GetUserByUsername(req.Username)
 	if err == nil {
 		c.JSON(http.StatusConflict, gin.H{"error": "User already exists"})
 		return
@@ -66,13 +57,13 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		UpdatedAt: time.Now(),
 	}
 
-	_, err = usersCollection.InsertOne(context.Background(), user)
+	err = h.AuthService.CreateUser(&user)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create user record"})
 		return
 	}
 
-	token, err := utils.GenerateJWT(user.ID.Hex(), user.Username, h.Config.JWTSecret)
+	token, err := utils.GenerateJWT(user.ID.Hex(), user.Username, user.Picture, h.Config.JWTSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "User created but login failed: " + err.Error()})
 		return
@@ -99,9 +90,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	usersCollection := h.MongoService.GetCollection("users")
-	var user models.User
-	err := usersCollection.FindOne(context.Background(), bson.M{"username": req.Username}).Decode(&user)
+	user, err := h.AuthService.GetUserByUsername(req.Username)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid credentials"})
@@ -116,7 +105,7 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	token, err := utils.GenerateJWT(user.ID.Hex(), user.Username, h.Config.JWTSecret)
+	token, err := utils.GenerateJWT(user.ID.Hex(), user.Username, user.Picture, h.Config.JWTSecret)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to generate token"})
 		return
@@ -143,15 +132,13 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 		return
 	}
 
-	objID, err := primitive.ObjectIDFromHex(userID.(string))
+	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
 	if err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
 		return
 	}
 
-	usersCollection := h.MongoService.GetCollection("users")
-	var user models.User
-	err = usersCollection.FindOne(context.Background(), bson.M{"_id": objID}).Decode(&user)
+	user, err := h.AuthService.GetUserByID(userObjectID.Hex())
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
