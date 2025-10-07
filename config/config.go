@@ -16,9 +16,9 @@ func Load() *Config {
 	godotenv.Load()
 
 	return &Config{
-		Port:      getEnv("PORT", ""),
-		MongoURI:  getEnv("MONGO_URI", ""),
-		JWTSecret: getEnv("JWT_SECRET", ""),
+		Port:      getEnv("PORT", "8000"),
+		MongoURI:  getEnv("MONGO_URI", "mongodb://localhost:27017/piscord"),
+		JWTSecret: getEnv("JWT_SECRET", "your-secret-key"),
 	}
 }
 

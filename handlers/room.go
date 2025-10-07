@@ -57,6 +57,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		Name:        req.Name,
 		Description: req.Description,
 		Type:        req.Type,
+		Picture:     req.Picture,
 		CreatedBy:   userObjectID,
 		Members:     []primitive.ObjectID{userObjectID},
 		Admins:      []primitive.ObjectID{},
@@ -94,6 +95,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 				ID:          existing.ID,
 				Name:        existing.Name,
 				Description: existing.Description,
+				Picture:     existing.Picture,
 				Type:        existing.Type,
 				CreatedBy:   existing.CreatedBy,
 				MemberCount: len(existing.Members),
@@ -101,6 +103,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 				IsActive:    existing.IsActive,
 				CreatedAt:   existing.CreatedAt,
 				UpdatedAt:   existing.UpdatedAt,
+				LastAction:  nil,
 			}
 
 			if existing.Type == "direct" {
@@ -118,7 +121,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 					return
 				}
 				roomResponse.DisplayName = user.Username
-				roomResponse.Avatar = user.Picture
+				roomResponse.Picture = user.Picture
 			} else {
 				roomResponse.DisplayName = room.Name
 			}
@@ -151,6 +154,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		ID:          room.ID,
 		Name:        room.Name,
 		Type:        room.Type,
+		Picture:     room.Picture,
 		Description: room.Description,
 		CreatedBy:   room.CreatedBy,
 		MemberCount: len(room.Members),
@@ -158,6 +162,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		IsActive:    room.IsActive,
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
+		LastAction:  nil,
 	}
 
 	if room.Type == "direct" {
@@ -175,7 +180,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 			return
 		}
 		roomResponse.DisplayName = user.Username
-		roomResponse.Avatar = user.Picture
+		roomResponse.Picture = user.Picture
 	} else {
 		roomResponse.DisplayName = room.Name
 	}
@@ -220,12 +225,14 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 		Name:        room.Name,
 		Description: room.Description,
 		Type:        room.Type,
+		Picture:     room.Picture,
 		CreatedBy:   room.CreatedBy,
 		MemberCount: len(room.Members),
 		MaxMembers:  room.MaxMembers,
 		IsActive:    room.IsActive,
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
+		LastAction:  nil,
 	}
 
 	if room.Type == "direct" {
@@ -244,7 +251,7 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 		}
 
 		roomResponse.DisplayName = user.Username
-		roomResponse.Avatar = user.Picture
+		roomResponse.Picture = user.Picture
 	} else {
 		roomResponse.DisplayName = room.Name
 	}
@@ -306,12 +313,14 @@ func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
 		Name:        room.Name,
 		Description: room.Description,
 		Type:        room.Type,
+		Picture:     room.Picture,
 		CreatedBy:   room.CreatedBy,
 		MemberCount: len(room.Members),
 		MaxMembers:  room.MaxMembers,
 		IsActive:    room.IsActive,
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
+		LastAction:  nil,
 	}
 
 	if room.Type == "direct" {
@@ -330,7 +339,7 @@ func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
 		}
 
 		roomResponse.DisplayName = user.Username
-		roomResponse.Avatar = user.Picture
+		roomResponse.Picture = user.Picture
 	} else {
 		roomResponse.DisplayName = room.Name
 	}
@@ -365,12 +374,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 
 	messagesCollection := h.MongoService.GetCollection("messages")
 
-	type RoomWithLastMessage struct {
-		models.RoomResponse
-		LastMessage models.MessagePreviewResponse `bson:"last_message,omitempty" json:"last_message,omitempty"`
-	}
-
-	var roomsWithMessages []RoomWithLastMessage
+	var roomsWithMessages = []models.RoomResponse{}
 
 	for cursor.Next(context.Background()) {
 		var room models.Room
@@ -383,12 +387,14 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 			Name:        room.Name,
 			Description: room.Description,
 			Type:        room.Type,
+			Picture:     room.Picture,
 			CreatedBy:   room.CreatedBy,
 			MemberCount: len(room.Members),
 			MaxMembers:  room.MaxMembers,
 			IsActive:    room.IsActive,
 			CreatedAt:   room.CreatedAt,
 			UpdatedAt:   room.UpdatedAt,
+			LastAction:  nil,
 		}
 
 		if room.Type == "direct" {
@@ -407,7 +413,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 			}
 
 			roomResponse.DisplayName = user.Username
-			roomResponse.Avatar = user.Picture
+			roomResponse.Picture = user.Picture
 		} else {
 			roomResponse.DisplayName = room.Name
 		}
@@ -422,9 +428,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 		err := messagesCollection.FindOne(context.Background(), messageFilter, opts).Decode(&lastMessage)
 
 		if lastMessage.Content == "" || err == mongo.ErrNoDocuments {
-			roomsWithMessages = append(roomsWithMessages, RoomWithLastMessage{
-				RoomResponse: roomResponse,
-			})
+			roomsWithMessages = append(roomsWithMessages, roomResponse)
 			continue
 		}
 
@@ -438,13 +442,14 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 			}
 		}
 
-		roomsWithMessages = append(roomsWithMessages, RoomWithLastMessage{
-			RoomResponse: roomResponse,
-			LastMessage:  lastMessagePreview,
-		})
+		roomResponse.LastAction = &lastMessagePreview
+		roomsWithMessages = append(roomsWithMessages, roomResponse)
 	}
 
-	c.JSON(http.StatusOK, roomsWithMessages)
+	c.JSON(http.StatusOK, gin.H{
+		"data":  roomsWithMessages,
+		"total": len(roomsWithMessages),
+	})
 }
 
 func (h *RoomHandler) JoinRoom(c *gin.Context) {

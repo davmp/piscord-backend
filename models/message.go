@@ -47,7 +47,6 @@ type MessageResponse struct {
 
 type MessagePreviewResponse struct {
 	ID        primitive.ObjectID `json:"id"`
-	RoomID    primitive.ObjectID `json:"room_id"`
 	Username  string             `json:"username"`
 	Content   string             `json:"content"`
 	CreatedAt time.Time          `json:"created_at"`

@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 )
 
@@ -33,10 +34,28 @@ func main() {
 	}()
 
 	router := gin.Default()
+	router.RedirectTrailingSlash = false
+
+	router.Use(cors.New(cors.Config{
+		AllowOrigins:     []string{"http://localhost:4200"},
+		AllowMethods:     []string{"GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"},
+		AllowHeaders:     []string{"Content-Type", "Authorization", "Accept", "Origin", "X-Requested-With"},
+		ExposeHeaders:    []string{"Content-Length"},
+		AllowCredentials: true,
+		MaxAge:           12 * time.Hour,
+	}))
 
 	authHandler := handlers.NewAuthHandler(authService, cfg)
 	chatHandler := handlers.NewChatHandler(chatService, cfg)
 	roomHandler := handlers.NewRoomHandler(mongoService, authService)
+
+	api := router.Group("/api")
+	api.Use(middleware.AuthMiddleware())
+	{
+		api.GET("/profile", authHandler.Profile)
+	}
+
+	api.GET("/api/ws", chatHandler.HandleWebsocket)
 
 	auth := router.Group("/api/auth")
 	{
@@ -44,22 +63,18 @@ func main() {
 		auth.POST("/login", authHandler.Login)
 	}
 
-	api := router.Group("/api")
-	api.Use(middleware.AuthMiddleware())
+	rooms := router.Group("/api/rooms")
+	rooms.Use(middleware.AuthMiddleware())
 	{
-		api.GET("/profile", authHandler.Profile)
-
-		api.GET("/rooms", roomHandler.GetRooms)
-		api.POST("/rooms", roomHandler.CreateRoom)
-		api.GET("/rooms/:id", roomHandler.GetRoom)
-		api.GET("/direct/:username", roomHandler.GetDirectRoom)
-		api.POST("/rooms/:id/join", roomHandler.JoinRoom)
-		api.POST("/rooms/:id/leave", roomHandler.LeaveRoom)
-		api.GET("/rooms/:id/messages", roomHandler.GetMessages)
-		api.GET("/direct/:username/messages", roomHandler.GetDirectMessages)
+		rooms.GET("", roomHandler.GetRooms)
+		rooms.POST("", roomHandler.CreateRoom)
+		rooms.GET("/:id", roomHandler.GetRoom)
+		rooms.GET("/direct/:username", roomHandler.GetDirectRoom)
+		rooms.POST("/:id/join", roomHandler.JoinRoom)
+		rooms.POST("/:id/leave", roomHandler.LeaveRoom)
+		rooms.GET("/:id/messages", roomHandler.GetMessages)
+		rooms.GET("/direct/:username/messages", roomHandler.GetDirectMessages)
 	}
-
-	api.GET("/api/ws", chatHandler.HandleWebsocket)
 
 	router.GET("/health", func(c *gin.Context) {
 		c.JSON(http.StatusOK, gin.H{"status": "ok"})

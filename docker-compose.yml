@@ -6,7 +6,7 @@ services:
     ports:
       - "27027:27017"
     environment:
-      MONGO_INITDB_DATABASE: piscordservice
+      MONGO_INITDB_DATABASE: piscord
     volumes:
       - mongodb_data:/data/db
     networks:
