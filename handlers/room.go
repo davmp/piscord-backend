@@ -93,7 +93,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		if err == nil {
 			roomResponse := models.RoomResponse{
 				ID:          existing.ID,
-				Name:        existing.Name,
+				DisplayName: existing.Name,
 				Description: existing.Description,
 				Picture:     existing.Picture,
 				Type:        existing.Type,
@@ -152,7 +152,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 
 	roomResponse := models.RoomResponse{
 		ID:          room.ID,
-		Name:        room.Name,
+		DisplayName: room.Name,
 		Type:        room.Type,
 		Picture:     room.Picture,
 		Description: room.Description,
@@ -181,8 +181,6 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		}
 		roomResponse.DisplayName = user.Username
 		roomResponse.Picture = user.Picture
-	} else {
-		roomResponse.DisplayName = room.Name
 	}
 
 	c.JSON(http.StatusCreated, roomResponse)
@@ -222,7 +220,7 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 
 	roomResponse := models.RoomResponse{
 		ID:          room.ID,
-		Name:        room.Name,
+		DisplayName: room.Name,
 		Description: room.Description,
 		Type:        room.Type,
 		Picture:     room.Picture,
@@ -252,8 +250,6 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 
 		roomResponse.DisplayName = user.Username
 		roomResponse.Picture = user.Picture
-	} else {
-		roomResponse.DisplayName = room.Name
 	}
 
 	c.JSON(http.StatusOK, roomResponse)
@@ -310,7 +306,7 @@ func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
 
 	roomResponse := models.RoomResponse{
 		ID:          room.ID,
-		Name:        room.Name,
+		DisplayName: room.Name,
 		Description: room.Description,
 		Type:        room.Type,
 		Picture:     room.Picture,
@@ -340,8 +336,6 @@ func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
 
 		roomResponse.DisplayName = user.Username
 		roomResponse.Picture = user.Picture
-	} else {
-		roomResponse.DisplayName = room.Name
 	}
 
 	c.JSON(http.StatusOK, roomResponse)
@@ -372,6 +366,66 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
+	var rooms = []models.PublicRoomResponse{}
+
+	for cursor.Next(context.Background()) {
+		var room models.Room
+		if err := cursor.Decode(&room); err != nil {
+			continue
+		}
+
+		roomResponse := models.PublicRoomResponse{
+			ID:          room.ID,
+			Description: room.Description,
+			Type:        room.Type,
+			Picture:     room.Picture,
+			CreatedBy:   room.CreatedBy,
+			MemberCount: len(room.Members),
+			MaxMembers:  room.MaxMembers,
+			IsActive:    room.IsActive,
+			CreatedAt:   room.CreatedAt,
+			UpdatedAt:   room.UpdatedAt,
+
+			DisplayName: room.Name,
+			IsMember:    !userObjectID.IsZero() && slices.Contains(room.Members, userObjectID),
+		}
+
+		rooms = append(rooms, roomResponse)
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"data":  rooms,
+		"total": len(rooms),
+	})
+}
+
+func (h *RoomHandler) GetMyRooms(c *gin.Context) {
+	userID, _ := c.Get("user_id")
+	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	roomsCollection := h.MongoService.GetCollection("rooms")
+	filter := bson.M{
+		"members":   userObjectID,
+		"is_active": true,
+	}
+
+	if search := c.Query("search"); search != "" {
+		filter["name"] = bson.M{"$regex": search, "$options": "i"}
+	}
+
+	opts := options.Find().SetSort(bson.D{{Key: "updated_at", Value: -1}})
+
+	cursor, err := roomsCollection.Find(context.Background(), filter, opts)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch rooms"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
 	messagesCollection := h.MongoService.GetCollection("messages")
 
 	var roomsWithMessages = []models.RoomResponse{}
@@ -384,7 +438,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 
 		roomResponse := models.RoomResponse{
 			ID:          room.ID,
-			Name:        room.Name,
+			DisplayName: room.Name,
 			Description: room.Description,
 			Type:        room.Type,
 			Picture:     room.Picture,
@@ -414,10 +468,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 
 			roomResponse.DisplayName = user.Username
 			roomResponse.Picture = user.Picture
-		} else {
-			roomResponse.DisplayName = room.Name
 		}
-
 		messageFilter := bson.M{
 			"room_id":    room.ID,
 			"is_deleted": false,

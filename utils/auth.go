@@ -9,7 +9,7 @@ import (
 )
 
 type Claims struct {
-	UserID   string `json:"user_id"`
+	Sub      string `json:"sub"`
 	Username string `json:"username"`
 	Picture  string `json:"picture"`
 	jwt.RegisteredClaims
@@ -27,7 +27,7 @@ func CheckPasswordHash(password, hash string) bool {
 
 func GenerateJWT(userID, username, picture, secret string) (string, error) {
 	claims := &Claims{
-		UserID:   userID,
+		Sub:      userID,
 		Username: username,
 		Picture:  picture,
 		RegisteredClaims: jwt.RegisteredClaims{

@@ -33,7 +33,7 @@ type CreateRoomRequest struct {
 
 type RoomResponse struct {
 	ID          primitive.ObjectID      `json:"id"`
-	Name        string                  `json:"name"`
+	DisplayName string                  `json:"display_name"`
 	Description string                  `json:"description,omitempty"`
 	Type        string                  `json:"type"`
 	Picture     string                  `json:"picture,omitempty"`
@@ -44,8 +44,22 @@ type RoomResponse struct {
 	CreatedAt   time.Time               `json:"created_at"`
 	UpdatedAt   time.Time               `json:"updated_at"`
 	LastAction  *MessagePreviewResponse `json:"last_action,omitempty"`
+}
+
+type PublicRoomResponse struct {
+	ID          primitive.ObjectID `json:"id"`
+	Description string             `json:"description,omitempty"`
+	Type        string             `json:"type"`
+	Picture     string             `json:"picture,omitempty"`
+	CreatedBy   primitive.ObjectID `json:"created_by"`
+	MemberCount int                `json:"member_count"`
+	MaxMembers  int                `json:"max_members,omitempty"`
+	IsActive    bool               `json:"is_active"`
+	CreatedAt   time.Time          `json:"created_at"`
+	UpdatedAt   time.Time          `json:"updated_at"`
 
 	DisplayName string `json:"display_name"`
+	IsMember    bool   `json:"is_member"`
 }
 
 type RoomMember struct {

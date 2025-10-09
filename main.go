@@ -55,7 +55,7 @@ func main() {
 		api.GET("/profile", authHandler.Profile)
 	}
 
-	api.GET("/api/ws", chatHandler.HandleWebsocket)
+	router.GET("/api/ws", chatHandler.HandleWebsocket)
 
 	auth := router.Group("/api/auth")
 	{
@@ -67,6 +67,7 @@ func main() {
 	rooms.Use(middleware.AuthMiddleware())
 	{
 		rooms.GET("", roomHandler.GetRooms)
+		rooms.GET("/my-rooms", roomHandler.GetMyRooms)
 		rooms.POST("", roomHandler.CreateRoom)
 		rooms.GET("/:id", roomHandler.GetRoom)
 		rooms.GET("/direct/:username", roomHandler.GetDirectRoom)
