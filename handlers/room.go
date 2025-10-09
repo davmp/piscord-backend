@@ -103,7 +103,6 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 				IsActive:    existing.IsActive,
 				CreatedAt:   existing.CreatedAt,
 				UpdatedAt:   existing.UpdatedAt,
-				LastAction:  nil,
 			}
 
 			if existing.Type == "direct" {
@@ -162,7 +161,6 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		IsActive:    room.IsActive,
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
-		LastAction:  nil,
 	}
 
 	if room.Type == "direct" {
@@ -230,7 +228,6 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 		IsActive:    room.IsActive,
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
-		LastAction:  nil,
 	}
 
 	if room.Type == "direct" {
@@ -316,7 +313,6 @@ func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
 		IsActive:    room.IsActive,
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
-		LastAction:  nil,
 	}
 
 	if room.Type == "direct" {
@@ -366,7 +362,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var rooms = []models.PublicRoomResponse{}
+	rooms := []models.PublicRoomResponse{}
 
 	for cursor.Next(context.Background()) {
 		var room models.Room
@@ -426,9 +422,7 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	messagesCollection := h.MongoService.GetCollection("messages")
-
-	var roomsWithMessages = []models.RoomResponse{}
+	roomsWithMessages := []models.RoomResponse{}
 
 	for cursor.Next(context.Background()) {
 		var room models.Room
@@ -448,7 +442,6 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 			IsActive:    room.IsActive,
 			CreatedAt:   room.CreatedAt,
 			UpdatedAt:   room.UpdatedAt,
-			LastAction:  nil,
 		}
 
 		if room.Type == "direct" {
@@ -469,31 +462,7 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 			roomResponse.DisplayName = user.Username
 			roomResponse.Picture = user.Picture
 		}
-		messageFilter := bson.M{
-			"room_id":    room.ID,
-			"is_deleted": false,
-		}
-		opts := options.FindOne().SetSort(bson.D{{Key: "created_at", Value: -1}})
 
-		var lastMessage models.Message
-		err := messagesCollection.FindOne(context.Background(), messageFilter, opts).Decode(&lastMessage)
-
-		if lastMessage.Content == "" || err == mongo.ErrNoDocuments {
-			roomsWithMessages = append(roomsWithMessages, roomResponse)
-			continue
-		}
-
-		var lastMessagePreview models.MessagePreviewResponse
-		if err == nil {
-			lastMessagePreview = models.MessagePreviewResponse{
-				ID:        lastMessage.ID,
-				Username:  lastMessage.Username,
-				Content:   lastMessage.Content,
-				CreatedAt: lastMessage.CreatedAt,
-			}
-		}
-
-		roomResponse.LastAction = &lastMessagePreview
 		roomsWithMessages = append(roomsWithMessages, roomResponse)
 	}
 
@@ -650,7 +619,7 @@ func (h *RoomHandler) GetMessages(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var messages []models.MessageResponse
+	messages := []models.MessageResponse{}
 	for cursor.Next(context.Background()) {
 		var message models.Message
 		if err := cursor.Decode(&message); err != nil {
@@ -758,7 +727,7 @@ func (h *RoomHandler) GetDirectMessages(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	var messages []models.MessageResponse
+	messages := []models.MessageResponse{}
 	for cursor.Next(context.Background()) {
 		var message models.Message
 		if err := cursor.Decode(&message); err != nil {
