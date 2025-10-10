@@ -163,16 +163,14 @@ func (h *ChatHandler) handleMessage(client *services.Client, message []byte) {
 	switch action {
 	case "enter_room":
 		h.handleEnterRoom(client, payload)
+	case "exit_room":
+		h.handleExitRoom(client, payload)
 	case "join_room":
 		h.handleJoinRoom(client, payload)
 	case "leave_room":
 		h.handleLeaveRoom(client, payload)
 	case "send_message":
 		h.handleSendMessage(client, payload)
-	case "notify_message":
-		// This action can be handled if needed
-	case "fetch_messages":
-		// This action can be handled if needed
 	case "typing":
 		h.handleTyping(client, payload)
 	default:
@@ -202,6 +200,16 @@ func (h *ChatHandler) handleEnterRoom(client *services.Client, payload map[strin
 		},
 	}
 	h.sendToClient(client, response)
+}
+
+func (h *ChatHandler) handleExitRoom(client *services.Client, payload map[string]any) {
+	roomID, ok := payload["room_id"].(string)
+	if !ok {
+		h.sendError(client, "Missing room_id")
+		return
+	}
+
+	h.ChatService.ExitRoom(client, roomID)
 }
 
 func (h *ChatHandler) handleJoinRoom(client *services.Client, payload map[string]any) {
@@ -272,7 +280,12 @@ func (h *ChatHandler) handleSendMessage(client *services.Client, payload map[str
 		messageType = msgType
 	}
 
-	err := h.ChatService.SendMessage(client, roomID, content, messageType)
+	fileUrl := ""
+	if fileUrlStr, exists := payload["file_url"].(string); exists {
+		fileUrl = fileUrlStr
+	}
+
+	err := h.ChatService.SendMessage(client, roomID, content, fileUrl, messageType)
 	if err != nil {
 		h.sendError(client, "Failed to send message: "+err.Error())
 		return

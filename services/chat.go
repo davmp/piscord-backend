@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"log"
 	"runtime/debug"
+	"slices"
 	"sync"
 	"time"
 
@@ -35,11 +36,12 @@ type Hub struct {
 }
 
 type ChatService struct {
-	Hub          *Hub
-	MongoService *MongoService
+	Hub                 *Hub
+	MongoService        *MongoService
+	NotificationService *NotificationService
 }
 
-func NewChatService(mongoService *MongoService) *ChatService {
+func NewChatService(mongoService *MongoService, notificationService *NotificationService) *ChatService {
 	hub := &Hub{
 		Clients:    make(map[string]*Client),
 		Broadcast:  make(chan []byte, 256),
@@ -49,8 +51,9 @@ func NewChatService(mongoService *MongoService) *ChatService {
 	}
 
 	chatService := &ChatService{
-		Hub:          hub,
-		MongoService: mongoService,
+		Hub:                 hub,
+		MongoService:        mongoService,
+		NotificationService: notificationService,
 	}
 
 	go chatService.Run()
@@ -99,12 +102,12 @@ func (cs *ChatService) EnterRoom(client *Client, roomID string) error {
 		return err
 	}
 
+	for currentRoomID := range client.Rooms {
+		cs.exitRoomInternal(client, currentRoomID)
+	}
+
 	cs.Hub.mutex.Lock()
 	defer cs.Hub.mutex.Unlock()
-
-	for currentRoomID := range client.Rooms {
-		cs.leaveRoomInternalUnsafe(client, currentRoomID)
-	}
 
 	if cs.Hub.Rooms[roomID] == nil {
 		cs.Hub.Rooms[roomID] = make(map[string]*Client)
@@ -130,12 +133,11 @@ func (cs *ChatService) JoinRoom(client *Client, roomID string) error {
 		return err
 	}
 
-	cs.Hub.mutex.Lock()
-	defer cs.Hub.mutex.Unlock()
-
 	for currentRoomID := range client.Rooms {
-		cs.leaveRoomInternalUnsafe(client, currentRoomID)
+		cs.exitRoomInternal(client, currentRoomID)
 	}
+
+	cs.Hub.mutex.Lock()
 
 	if cs.Hub.Rooms[roomID] == nil {
 		cs.Hub.Rooms[roomID] = make(map[string]*Client)
@@ -144,9 +146,8 @@ func (cs *ChatService) JoinRoom(client *Client, roomID string) error {
 	client.Rooms[roomID] = true
 
 	cs.Hub.mutex.Unlock()
-	cs.Hub.mutex.Lock()
 
-	notification := models.WSResponse{
+	message := models.WSResponse{
 		Type:    "user_joined",
 		Success: true,
 		Data: map[string]any{
@@ -159,11 +160,20 @@ func (cs *ChatService) JoinRoom(client *Client, roomID string) error {
 		},
 	}
 
-	cs.Hub.mutex.Unlock()
-	cs.broadcastToRoomExcept(roomID, notification, client)
-	cs.Hub.mutex.Lock()
+	notification := models.NotificationRequest{
+		Content:  client.Username,
+		Type:     models.NotificationTypeUserJoined,
+		ObjectID: &roomObjectID,
+	}
+
+	cs.broadcastToRoomExcept(roomID, message, client)
+	cs.notificateGroupUsers(roomID, notification)
 
 	return nil
+}
+
+func (cs *ChatService) ExitRoom(client *Client, roomID string) {
+	cs.exitRoomInternal(client, roomID)
 }
 
 func (cs *ChatService) LeaveRoom(client *Client, roomID string) {
@@ -180,7 +190,7 @@ func (cs *ChatService) GetUserCurrentRoom(client *Client) string {
 	return ""
 }
 
-func (cs *ChatService) SendMessage(client *Client, roomID, content, messageType string) error {
+func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, messageType string) error {
 	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
 	if err != nil {
 		return err
@@ -199,6 +209,7 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, messageType 
 		Picture:   client.Picture,
 		Content:   content,
 		Type:      messageType,
+		FileURL:   fileUrl,
 		IsEdited:  false,
 		IsDeleted: false,
 		CreatedAt: time.Now(),
@@ -209,6 +220,15 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, messageType 
 	if err != nil {
 		return err
 	}
+
+	cs.notificateGroupUsers(
+		roomID,
+		models.NotificationRequest{
+			Content:  content,
+			Type:     models.NotificationTypeNewMessage,
+			ObjectID: &message.ID,
+		},
+	)
 
 	cs.broadcastToRoomExcept(
 		roomID,
@@ -270,26 +290,25 @@ func (cs *ChatService) unregisterClient(client *Client) {
 		}
 	}()
 
+	for roomID := range client.Rooms {
+		cs.exitRoomInternal(client, roomID)
+	}
+
 	cs.Hub.mutex.Lock()
 	defer cs.Hub.mutex.Unlock()
 
-	for roomID := range client.Rooms {
-		cs.leaveRoomInternalUnsafe(client, roomID)
-	}
-
 	delete(cs.Hub.Clients, client.UserID)
 
-	go func() {
-		close(client.Send)
-	}()
-	go func() {
-		if client.Conn != nil {
-			client.Conn.Close()
-		}
-	}()
+	close(client.Send)
+	if client.Conn != nil {
+		client.Conn.Close()
+	}
 }
 
-func (cs *ChatService) leaveRoomInternalUnsafe(client *Client, roomID string) {
+func (cs *ChatService) exitRoomInternal(client *Client, roomID string) {
+	cs.Hub.mutex.Lock()
+	defer cs.Hub.mutex.Unlock()
+
 	if room, exists := cs.Hub.Rooms[roomID]; exists {
 		delete(room, client.UserID)
 		if len(room) == 0 {
@@ -298,6 +317,35 @@ func (cs *ChatService) leaveRoomInternalUnsafe(client *Client, roomID string) {
 	}
 
 	delete(client.Rooms, roomID)
+}
+
+func (cs *ChatService) leaveRoomInternal(client *Client, roomID string) {
+	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
+	if err != nil {
+		return
+	}
+
+	cs.Hub.mutex.Lock()
+
+	if room, exists := cs.Hub.Rooms[roomID]; exists {
+		delete(room, client.UserID)
+		if len(room) == 0 {
+			delete(cs.Hub.Rooms, roomID)
+		}
+	}
+
+	cs.Hub.mutex.Unlock()
+
+	delete(client.Rooms, roomID)
+
+	cs.notificateGroupUsers(
+		roomID,
+		models.NotificationRequest{
+			Content:  client.Username,
+			Type:     models.NotificationTypeUserLeft,
+			ObjectID: &roomObjectID,
+		},
+	)
 
 	notification := models.WSResponse{
 		Type:    "user_left",
@@ -313,16 +361,80 @@ func (cs *ChatService) leaveRoomInternalUnsafe(client *Client, roomID string) {
 	}
 
 	if len(cs.Hub.Rooms[roomID]) > 0 {
-		cs.Hub.mutex.Unlock()
 		cs.broadcastToRoom(roomID, cs.marshalResponse(notification))
-		cs.Hub.mutex.Lock()
 	}
 }
 
-func (cs *ChatService) leaveRoomInternal(client *Client, roomID string) {
-	cs.Hub.mutex.Lock()
-	defer cs.Hub.mutex.Unlock()
-	cs.leaveRoomInternalUnsafe(client, roomID)
+func (cs *ChatService) notificateGroupUsers(roomID string, req models.NotificationRequest) error {
+	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
+	if err != nil {
+		return err
+	}
+
+	room := models.Room{}
+	err = cs.MongoService.GetCollection("rooms").FindOne(context.Background(), bson.M{"_id": roomObjectID}).Decode(&room)
+	if err != nil {
+		return err
+	}
+
+	if len(room.Members) == 0 {
+		return nil
+	}
+
+	cs.Hub.mutex.RLock()
+	roomMap := cs.Hub.Rooms[roomID]
+	cs.Hub.mutex.RUnlock()
+
+	usersOutOfRoom := make([]primitive.ObjectID, 0, len(room.Members))
+	for _, memberHex := range room.Members {
+		if roomMap == nil {
+			if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, memberHex)) {
+				usersOutOfRoom = append(usersOutOfRoom, memberHex)
+			}
+			continue
+		}
+
+		if _, ok := roomMap[memberHex.Hex()]; !ok {
+			if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, memberHex)) {
+				usersOutOfRoom = append(usersOutOfRoom, memberHex)
+			}
+		}
+	}
+
+	for _, userID := range usersOutOfRoom {
+		notification := models.Notification{
+			ID:        primitive.NewObjectID(),
+			UserID:    userID,
+			Content:   req.Content,
+			Type:      req.Type,
+			ObjectID:  req.ObjectID,
+			ReadAt:    nil,
+			CreatedAt: time.Now(),
+		}
+
+		if err := cs.NotificationService.CreateNotification(&notification); err != nil {
+			return err
+		}
+
+		memberHex := userID.Hex()
+		client := cs.getClientSnapshot(memberHex)
+
+		if client == nil {
+			continue
+		}
+
+		cs.sendToClient(client, models.WSResponse{
+			Type:    "notification",
+			Success: true,
+			Data: map[string]any{
+				"id":        notification.ID.Hex(),
+				"type":      notification.Type,
+				"object_id": notification.ObjectID.Hex(),
+			},
+		})
+	}
+
+	return nil
 }
 
 func (cs *ChatService) broadcastMessage(message []byte) {
@@ -332,6 +444,7 @@ func (cs *ChatService) broadcastMessage(message []byte) {
 			debug.PrintStack()
 		}
 	}()
+
 	var wsMsg models.WSMessage
 	if err := json.Unmarshal(message, &wsMsg); err != nil {
 		log.Printf("Error unmarshaling broadcast message: %v", err)
@@ -363,10 +476,11 @@ func (cs *ChatService) broadcastMessage(message []byte) {
 	}
 
 	for _, c := range toRemove {
-		cCopy := c
-		go func(cl *Client) {
-			cs.Hub.Unregister <- cl
-		}(cCopy)
+		select {
+		case cs.Hub.Unregister <- c:
+		default:
+			log.Printf("Failed to unregister client %s", c.UserID)
+		}
 	}
 }
 
@@ -389,10 +503,11 @@ func (cs *ChatService) broadcastToRoom(roomID string, message []byte) {
 	}
 
 	for _, c := range toRemove {
-		cCopy := c
-		go func(cl *Client) {
-			cs.Hub.Unregister <- cl
-		}(cCopy)
+		select {
+		case cs.Hub.Unregister <- c:
+		default:
+			log.Printf("Failed to unregister client %s from room %s", c.UserID, roomID)
+		}
 	}
 }
 
@@ -420,10 +535,11 @@ func (cs *ChatService) broadcastToRoomExcept(roomID string, response models.WSRe
 	}
 
 	for _, c := range toRemove {
-		cCopy := c
-		go func(cl *Client) {
-			cs.Hub.Unregister <- cl
-		}(cCopy)
+		select {
+		case cs.Hub.Unregister <- c:
+		default:
+			log.Printf("Failed to unregister client %s from room %s", c.UserID, roomID)
+		}
 	}
 }
 
@@ -436,6 +552,12 @@ func (cs *ChatService) sendToClient(client *Client, response models.WSResponse) 
 			cs.Hub.Unregister <- cl
 		}(client)
 	}
+}
+
+func (cs *ChatService) getClientSnapshot(userHex string) *Client {
+	cs.Hub.mutex.RLock()
+	defer cs.Hub.mutex.RUnlock()
+	return cs.Hub.Clients[userHex]
 }
 
 func (cs *ChatService) marshalResponse(response models.WSResponse) []byte {

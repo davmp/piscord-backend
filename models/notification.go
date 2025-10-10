@@ -10,22 +10,29 @@ type NotificationType string
 
 const (
 	NotificationTypeNewMessage          NotificationType = "NEW_MESSAGE"
-	NotificationTypeMessageReaction     NotificationType = "MESSAGE_REACTION"
+	NotificationTypeUserJoined          NotificationType = "USER_JOINED"
+	NotificationTypeUserLeft            NotificationType = "USER_LEFT"
 	NotificationTypeFriendRequest       NotificationType = "FRIEND_REQUEST"
 	NotificationTypeFriendRequestAccept NotificationType = "FRIEND_REQUEST_ACCEPTED"
 	NotificationTypeRoomInvite          NotificationType = "ROOM_INVITE"
 	NotificationTypeMention             NotificationType = "MENTION"
 	NotificationTypeSystem              NotificationType = "SYSTEM"
-	NotificationTypeOther               NotificationType = "OTHER"
 )
 
 type Notification struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	UserID    primitive.ObjectID `bson:"user_id" json:"user_id"`
-	Content   string             `bson:"content" json:"content"`
-	Type      NotificationType   `bson:"type" json:"type"`
-	ReadAt    *time.Time         `bson:"read_at,omitempty" json:"read_at,omitempty"`
-	CreatedAt time.Time          `bson:"created_at" json:"created_at"`
+	ID        primitive.ObjectID  `bson:"_id,omitempty" json:"id"`
+	UserID    primitive.ObjectID  `bson:"user_id" json:"user_id"`
+	Content   string              `bson:"content" json:"content"`
+	Type      NotificationType    `bson:"type" json:"type"`
+	ObjectID  *primitive.ObjectID `bson:"object_id" json:"object_id"`
+	ReadAt    *time.Time          `bson:"read_at,omitempty" json:"read_at,omitempty"`
+	CreatedAt time.Time           `bson:"created_at" json:"created_at"`
+}
+
+type NotificationRequest struct {
+	Content  string              `json:"content"`
+	Type     NotificationType    `json:"type"`
+	ObjectID *primitive.ObjectID `json:"object_id"`
 }
 
 type NotificationResponse struct {
