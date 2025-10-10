@@ -347,7 +347,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 
 	roomsCollection := h.MongoService.GetCollection("rooms")
 	filter := bson.M{
-		"members":   userObjectID,
+		"type":      "public",
 		"is_active": true,
 	}
 

@@ -149,7 +149,7 @@ func (ns *NotificationService) responseNotification(notification models.Notifica
 			notificationResponse.Picture = message.Picture
 
 			var room models.Room
-			if err := ns.MongoService.GetCollection("rooms").FindOne(context.Background(), bson.M{"_id": message.RoomID}).Decode(&message); err == nil {
+			if err := ns.MongoService.GetCollection("rooms").FindOne(context.Background(), bson.M{"_id": message.RoomID}).Decode(&room); err == nil {
 				notificationResponse.Title = "Nova mensagem em " + room.Name
 
 				var content string
