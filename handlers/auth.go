@@ -165,17 +165,24 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 	c.JSON(http.StatusOK, userResponse)
 }
 
-func (h *AuthHandler) GetProfileByUsername(c *gin.Context) {
-	username, exists := c.Get("username")
+func (h *AuthHandler) GetProfileByID(c *gin.Context) {
+	profileID := c.Param("id")
+	profileObjectID, err := primitive.ObjectIDFromHex(profileID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room ID"})
+		return
+	}
+
+	_, exists := c.Get("user_id")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
 
-	user, err := h.AuthService.GetUserByUsername(username.(string))
+	user, err := h.AuthService.GetUserByID(profileObjectID)
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
-			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
 		} else {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
 		}

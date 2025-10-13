@@ -39,9 +39,10 @@ type ChatService struct {
 	Hub                 *Hub
 	MongoService        *MongoService
 	NotificationService *NotificationService
+	AuthService         *AuthService
 }
 
-func NewChatService(mongoService *MongoService, notificationService *NotificationService) *ChatService {
+func NewChatService(mongoService *MongoService, notificationService *NotificationService, authService *AuthService) *ChatService {
 	hub := &Hub{
 		Clients:    make(map[string]*Client),
 		Broadcast:  make(chan []byte, 256),
@@ -54,6 +55,7 @@ func NewChatService(mongoService *MongoService, notificationService *Notificatio
 		Hub:                 hub,
 		MongoService:        mongoService,
 		NotificationService: notificationService,
+		AuthService:         authService,
 	}
 
 	go chatService.Run()
@@ -195,7 +197,7 @@ func (cs *ChatService) GetUserCurrentStatus(userID string) bool {
 	return client != nil
 }
 
-func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, messageType string) error {
+func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, messageType string, replyTo *primitive.ObjectID) error {
 	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
 	if err != nil {
 		return err
@@ -213,10 +215,15 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		Content:   content,
 		Type:      messageType,
 		FileURL:   fileUrl,
+		ReplyTo:   nil,
 		IsEdited:  false,
 		IsDeleted: false,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
+	}
+
+	if replyTo != nil {
+		message.ReplyTo = replyTo
 	}
 
 	_, err = cs.MongoService.GetCollection("messages").InsertOne(context.Background(), message)
@@ -233,10 +240,28 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		Content:   message.Content,
 		Type:      message.Type,
 		FileURL:   message.FileURL,
-		ReplyTo:   message.ReplyTo,
+		ReplyTo:   nil,
 		IsEdited:  message.IsEdited,
 		CreatedAt: message.CreatedAt,
 		UpdatedAt: message.UpdatedAt,
+	}
+
+	if message.ReplyTo != nil {
+		var replyToMessage models.Message
+
+		if err := cs.MongoService.GetCollection("messages").FindOne(context.Background(), bson.M{"_id": message.ReplyTo}).Decode(&replyToMessage); err == nil {
+			messageResponse.ReplyTo = &models.MessagePreviewResponse{
+				ID:        replyToMessage.ID,
+				Username:  "Desconhecido",
+				Content:   replyToMessage.Content,
+				CreatedAt: replyToMessage.CreatedAt,
+			}
+
+			if user, err := cs.AuthService.GetUserByID(replyToMessage.UserID); err == nil {
+				messageResponse.ReplyTo.Username = user.Username
+				messageResponse.ReplyTo.Picture = user.Picture
+			}
+		}
 	}
 
 	cs.notificateGroupUsers(
@@ -271,6 +296,40 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 	})
 
 	return nil
+}
+
+func (cs *ChatService) EditMessage(client *Client, roomID, messageID, content string) error {
+	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
+	if err != nil {
+		return err
+	}
+
+	userObjectID, err := primitive.ObjectIDFromHex(client.UserID)
+	if err != nil {
+		return err
+	}
+
+	messageObjectID, err := primitive.ObjectIDFromHex(messageID)
+	if err != nil {
+		return err
+	}
+
+	_, err = cs.MongoService.GetCollection("messages").UpdateOne(
+		context.Background(),
+		bson.M{
+			"_id":     messageObjectID,
+			"user_id": userObjectID,
+			"room_id": roomObjectID,
+		},
+		bson.M{
+			"$set": bson.M{
+				"content":   content,
+				"is_edited": true,
+			},
+		},
+	)
+
+	return err
 }
 
 func (cs *ChatService) registerClient(client *Client) {

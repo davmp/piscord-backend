@@ -14,6 +14,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
+	"go.mongodb.org/mongo-driver/bson/primitive"
 )
 
 var upgrader = websocket.Upgrader{
@@ -171,6 +172,9 @@ func (h *ChatHandler) handleMessage(client *services.Client, message []byte) {
 		h.handleLeaveRoom(client, payload)
 	case "send_message":
 		h.handleSendMessage(client, payload)
+		h.handleLeaveRoom(client, payload)
+	case "edit_message":
+		h.handleEditMessage(client, payload)
 	case "typing":
 		h.handleTyping(client, payload)
 	default:
@@ -285,7 +289,19 @@ func (h *ChatHandler) handleSendMessage(client *services.Client, payload map[str
 		fileUrl = fileUrlStr
 	}
 
-	err := h.ChatService.SendMessage(client, roomID, content, fileUrl, messageType)
+	var replyTo *primitive.ObjectID = nil
+	if replyToStr, exists := payload["reply_to"].(string); exists {
+		replyToObjectID, err := primitive.ObjectIDFromHex(replyToStr)
+
+		if err != nil {
+			h.sendError(client, "Invalid message to reply")
+			return
+		}
+
+		replyTo = &replyToObjectID
+	}
+
+	err := h.ChatService.SendMessage(client, roomID, content, fileUrl, messageType, replyTo)
 	if err != nil {
 		h.sendError(client, "Failed to send message: "+err.Error())
 		return
@@ -295,6 +311,45 @@ func (h *ChatHandler) handleSendMessage(client *services.Client, payload map[str
 		Type:    "message_sent",
 		Success: true,
 		Message: "Message sent successfully",
+	}
+	h.sendToClient(client, response)
+}
+
+func (h *ChatHandler) handleEditMessage(client *services.Client, payload map[string]any) {
+	roomID, ok := payload["room_id"].(string)
+	if !ok {
+		h.sendError(client, "Missing room_id")
+		return
+	}
+
+	currentRoom := h.ChatService.GetUserCurrentRoom(client)
+	if currentRoom != roomID {
+		h.sendError(client, "You are not currently in this room")
+		return
+	}
+
+	messageId, ok := payload["message_id"].(string)
+	if !ok {
+		h.sendError(client, "Missing message to edit")
+		return
+	}
+
+	content, ok := payload["content"].(string)
+	if !ok {
+		h.sendError(client, "Missing content")
+		return
+	}
+
+	err := h.ChatService.EditMessage(client, roomID, messageId, content)
+	if err != nil {
+		h.sendError(client, "Failed to edit message: "+err.Error())
+		return
+	}
+
+	response := models.WSResponse{
+		Type:    "message_editted",
+		Success: true,
+		Message: "Message editted successfully",
 	}
 	h.sendToClient(client, response)
 }

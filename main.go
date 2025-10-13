@@ -23,7 +23,7 @@ func main() {
 	mongoService := services.NewMongoService(cfg.MongoURI)
 	authService := services.NewAuthService(mongoService)
 	notificationService := services.NewNotificationService(authService, mongoService)
-	chatService := services.NewChatService(mongoService, notificationService)
+	chatService := services.NewChatService(mongoService, notificationService, authService)
 
 	if err := mongoService.Connect(); err != nil {
 		log.Fatal("Error connecting to MongoDB: ", err)
@@ -56,7 +56,7 @@ func main() {
 	{
 		profile.GET("", authHandler.Profile)
 		profile.PUT("", authHandler.UpdateProfile)
-		profile.GET("/username/:username", authHandler.GetProfileByUsername)
+		profile.GET("/:id", authHandler.GetProfileByID)
 	}
 
 	router.GET("/api/ws", chatHandler.HandleWebsocket)

@@ -571,10 +571,28 @@ func (h *RoomHandler) GetMessages(c *gin.Context) {
 			Content:   message.Content,
 			Type:      message.Type,
 			FileURL:   message.FileURL,
-			ReplyTo:   message.ReplyTo,
+			ReplyTo:   nil,
 			IsEdited:  message.IsEdited,
 			CreatedAt: message.CreatedAt,
 			UpdatedAt: message.UpdatedAt,
+		}
+
+		if message.ReplyTo != nil {
+			var replyToMessage models.Message
+
+			if err := h.MongoService.GetCollection("messages").FindOne(context.Background(), bson.M{"_id": message.ReplyTo}).Decode(&replyToMessage); err == nil {
+				messageResponse.ReplyTo = &models.MessagePreviewResponse{
+					ID:        replyToMessage.ID,
+					Username:  "Desconhecido",
+					Content:   replyToMessage.Content,
+					CreatedAt: replyToMessage.CreatedAt,
+				}
+
+				if user, err := h.AuthService.GetUserByID(replyToMessage.UserID); err == nil {
+					messageResponse.ReplyTo.Username = user.Username
+					messageResponse.ReplyTo.Picture = user.Picture
+				}
+			}
 		}
 
 		if message.UserID == userObjectID {
