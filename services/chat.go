@@ -70,13 +70,13 @@ func (cs *ChatService) Run() {
 	for {
 		select {
 		case client := <-cs.Hub.Register:
-			go cs.registerClient(client)
+			cs.registerClient(client)
 
 		case client := <-cs.Hub.Unregister:
-			go cs.unregisterClient(client)
+			cs.unregisterClient(client)
 
 		case message := <-cs.Hub.Broadcast:
-			go cs.broadcastMessage(message)
+			cs.broadcastMessage(message)
 		}
 	}
 }
@@ -188,6 +188,11 @@ func (cs *ChatService) GetUserCurrentRoom(client *Client) string {
 		return roomID
 	}
 	return ""
+}
+
+func (cs *ChatService) GetUserCurrentStatus(userID string) bool {
+	client := cs.getClientSnapshot(userID)
+	return client != nil
 }
 
 func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, messageType string) error {

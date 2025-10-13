@@ -114,7 +114,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 					}
 				}
 
-				user, err := h.AuthService.GetUserByID(otherMemberID.Hex())
+				user, err := h.AuthService.GetUserByID(otherMemberID)
 				if err != nil {
 					c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user"})
 					return
@@ -172,7 +172,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 			}
 		}
 
-		user, err := h.AuthService.GetUserByID(otherMemberID.Hex())
+		user, err := h.AuthService.GetUserByID(otherMemberID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info"})
 			return
@@ -239,7 +239,7 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 			}
 		}
 
-		user, err := h.AuthService.GetUserByID(otherMemberID.Hex())
+		user, err := h.AuthService.GetUserByID(otherMemberID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info"})
 			return
@@ -324,7 +324,7 @@ func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
 			}
 		}
 
-		user, err := h.AuthService.GetUserByID(otherMemberID.Hex())
+		user, err := h.AuthService.GetUserByID(otherMemberID)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info"})
 			return
@@ -453,7 +453,7 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 				}
 			}
 
-			user, err := h.AuthService.GetUserByID(otherMemberID.Hex())
+			user, err := h.AuthService.GetUserByID(otherMemberID)
 			if err != nil {
 				c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info"})
 				return

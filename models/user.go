@@ -9,7 +9,7 @@ import (
 type User struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
 	Username  string             `bson:"username" json:"username" binding:"required,min=3,max=30"`
-	Password  string             `bson:"password" json:"password,omitempty" binding:"required,min=6"`
+	Password  string             `bson:"password" json:"password,omitempty" binding:"required,min=4"`
 	Picture   string             `bson:"picture,omitempty" json:"picture,omitempty"`
 	Bio       string             `bson:"bio,omitempty" json:"bio,omitempty"`
 	CreatedAt time.Time          `bson:"created_at" json:"created_at"`
@@ -17,14 +17,15 @@ type User struct {
 }
 
 type UserResponse struct {
-	ID       primitive.ObjectID `json:"id"`
-	Username string             `json:"username"`
-	Picture  string             `json:"picture,omitempty"`
-	Bio      string             `json:"bio,omitempty"`
-	IsOnline bool               `json:"is_online"`
+	ID        primitive.ObjectID `json:"id"`
+	Username  string             `json:"username"`
+	Picture   string             `json:"picture,omitempty"`
+	Bio       string             `json:"bio,omitempty"`
+	CreatedAt time.Time          `json:"created_at"`
+	IsOnline  bool               `json:"is_online"`
 }
 
-type UpdateUserRequest struct {
+type UpdateProfileRequest struct {
 	Username string `json:"username,omitempty" binding:"omitempty,min=3,max=30"`
 	Password string `json:"password,omitempty" binding:"omitempty,min=6"`
 	Picture  string `json:"picture,omitempty"`

@@ -4,6 +4,7 @@ import (
 	"context"
 	"piscord-backend/models"
 
+	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/v2/bson"
 )
 
@@ -17,7 +18,7 @@ func NewAuthService(mongoService *MongoService) *AuthService {
 	}
 }
 
-func (as *AuthService) GetUserByID(userID string) (*models.User, error) {
+func (as *AuthService) GetUserByID(userID primitive.ObjectID) (*models.User, error) {
 	var user models.User
 	err := as.MongoService.GetCollection("users").FindOne(context.Background(), bson.M{"_id": userID}).Decode(&user)
 	if err != nil {
@@ -40,7 +41,17 @@ func (as *AuthService) CreateUser(user *models.User) error {
 	return err
 }
 
-func (as *AuthService) UpdateUser(userID string, update bson.M) error {
+func (as *AuthService) UpdateUser(userID primitive.ObjectID, update map[string]any) (*models.User, error) {
 	_, err := as.MongoService.GetCollection("users").UpdateOne(context.Background(), bson.M{"_id": userID}, bson.M{"$set": update})
-	return err
+	if err != nil {
+		return nil, err
+	}
+
+	var updatedUser models.User
+	err = as.MongoService.GetCollection("users").FindOne(context.Background(), bson.M{"_id": userID}).Decode(&updatedUser)
+	if err != nil {
+		return nil, err
+	}
+
+	return &updatedUser, nil
 }

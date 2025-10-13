@@ -46,15 +46,17 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	authHandler := handlers.NewAuthHandler(authService, cfg)
+	authHandler := handlers.NewAuthHandler(authService, chatService, cfg)
 	chatHandler := handlers.NewChatHandler(chatService, cfg)
 	roomHandler := handlers.NewRoomHandler(mongoService, authService)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 
-	api := router.Group("/api")
-	api.Use(middleware.AuthMiddleware())
+	profile := router.Group("/api/profile")
+	profile.Use(middleware.AuthMiddleware())
 	{
-		api.GET("/profile", authHandler.Profile)
+		profile.GET("", authHandler.Profile)
+		profile.PUT("", authHandler.UpdateProfile)
+		profile.GET("/username/:username", authHandler.GetProfileByUsername)
 	}
 
 	router.GET("/api/ws", chatHandler.HandleWebsocket)

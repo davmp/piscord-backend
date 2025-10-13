@@ -11,17 +11,20 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"go.mongodb.org/mongo-driver/bson/primitive"
+	"go.mongodb.org/mongo-driver/v2/bson"
 	"go.mongodb.org/mongo-driver/v2/mongo"
 )
 
 type AuthHandler struct {
 	AuthService *services.AuthService
+	ChatService *services.ChatService
 	Config      *config.Config
 }
 
-func NewAuthHandler(authService *services.AuthService, config *config.Config) *AuthHandler {
+func NewAuthHandler(authService *services.AuthService, chatService *services.ChatService, config *config.Config) *AuthHandler {
 	return &AuthHandler{
 		AuthService: authService,
+		ChatService: chatService,
 		Config:      config,
 	}
 }
@@ -70,11 +73,12 @@ func (h *AuthHandler) Register(c *gin.Context) {
 	}
 
 	userResponse := models.UserResponse{
-		ID:       user.ID,
-		Username: user.Username,
-		Picture:  user.Picture,
-		Bio:      user.Bio,
-		IsOnline: true,
+		ID:        user.ID,
+		Username:  user.Username,
+		Picture:   user.Picture,
+		Bio:       user.Bio,
+		CreatedAt: user.CreatedAt,
+		IsOnline:  true,
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -112,11 +116,12 @@ func (h *AuthHandler) Login(c *gin.Context) {
 	}
 
 	userResponse := models.UserResponse{
-		ID:       user.ID,
-		Username: user.Username,
-		Picture:  user.Picture,
-		Bio:      user.Bio,
-		IsOnline: true,
+		ID:        user.ID,
+		Username:  user.Username,
+		Picture:   user.Picture,
+		Bio:       user.Bio,
+		CreatedAt: user.CreatedAt,
+		IsOnline:  h.ChatService.GetUserCurrentStatus(user.ID.Hex()),
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -138,7 +143,36 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 		return
 	}
 
-	user, err := h.AuthService.GetUserByID(userObjectID.Hex())
+	user, err := h.AuthService.GetUserByID(userObjectID)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		}
+		return
+	}
+
+	userResponse := models.UserResponse{
+		ID:        user.ID,
+		Username:  user.Username,
+		Picture:   user.Picture,
+		Bio:       user.Bio,
+		CreatedAt: user.CreatedAt,
+		IsOnline:  h.ChatService.GetUserCurrentStatus(user.ID.Hex()),
+	}
+
+	c.JSON(http.StatusOK, userResponse)
+}
+
+func (h *AuthHandler) GetProfileByUsername(c *gin.Context) {
+	username, exists := c.Get("username")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	user, err := h.AuthService.GetUserByUsername(username.(string))
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
 			c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
@@ -149,11 +183,80 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 	}
 
 	userResponse := models.UserResponse{
-		ID:       user.ID,
-		Username: user.Username,
-		Picture:  user.Picture,
-		Bio:      user.Bio,
-		IsOnline: true,
+		ID:        user.ID,
+		Username:  user.Username,
+		Picture:   user.Picture,
+		Bio:       user.Bio,
+		CreatedAt: user.CreatedAt,
+		IsOnline:  h.ChatService.GetUserCurrentStatus(user.ID.Hex()),
+	}
+
+	c.JSON(http.StatusOK, userResponse)
+}
+
+func (h *AuthHandler) UpdateProfile(c *gin.Context) {
+	var req models.UpdateProfileRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	userID, exists := c.Get("user_id")
+	if !exists {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
+		return
+	}
+
+	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	update := bson.M{}
+
+	if req.Picture != "" {
+		update = bson.M{
+			"picture": req.Picture,
+		}
+	}
+
+	if req.Username != "" {
+		if _, err := h.AuthService.GetUserByUsername(req.Username); err == nil {
+			c.JSON(http.StatusConflict, gin.H{"error": "Username already exists"})
+			return
+		}
+
+		update["username"] = req.Username
+	}
+
+	if req.Bio != "" {
+		update["bio"] = req.Bio
+	}
+
+	if req.Password != "" {
+		hashedPassword, err := utils.HashPassword(req.Password)
+		if err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to hash password"})
+			return
+		}
+
+		update["password"] = hashedPassword
+	}
+
+	user, err := h.AuthService.UpdateUser(userObjectID, update)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user record"})
+		return
+	}
+
+	userResponse := models.UserResponse{
+		ID:        user.ID,
+		Username:  user.Username,
+		Picture:   user.Picture,
+		Bio:       user.Bio,
+		CreatedAt: user.CreatedAt,
+		IsOnline:  h.ChatService.GetUserCurrentStatus(user.ID.Hex()),
 	}
 
 	c.JSON(http.StatusOK, userResponse)
