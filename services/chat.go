@@ -210,8 +210,6 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		ID:        primitive.NewObjectID(),
 		RoomID:    roomObjectID,
 		UserID:    userObjectID,
-		Username:  client.Username,
-		Picture:   client.Picture,
 		Content:   content,
 		Type:      messageType,
 		FileURL:   fileUrl,

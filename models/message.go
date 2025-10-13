@@ -10,8 +10,6 @@ type Message struct {
 	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
 	RoomID    primitive.ObjectID `bson:"room_id" json:"room_id"`
 	UserID    primitive.ObjectID `bson:"user_id" json:"user_id"`
-	Username  string             `bson:"username" json:"username"`
-	Picture   string             `bson:"picture,omitempty" json:"picture,omitempty"`
 	Content   string             `bson:"content" json:"content"`
 	Type      string             `bson:"type" json:"type"` // "text", "image", "file", "system"
 	FileURL   string             `bson:"file_url,omitempty" json:"file_url,omitempty"`

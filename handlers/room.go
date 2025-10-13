@@ -256,91 +256,6 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 	c.JSON(http.StatusOK, roomResponse)
 }
 
-func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
-	username := c.Param("username")
-	if username == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username"})
-		return
-	}
-
-	userID, _ := c.Get("user_id")
-	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-
-	participant, err := h.AuthService.GetUserByUsername(username)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
-	}
-
-	if userObjectID == participant.ID {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Cannot create direct room with yourself"})
-		return
-	}
-
-	roomsCollection := h.MongoService.GetCollection("rooms")
-	var room models.Room
-
-	var userIDs = []primitive.ObjectID{userObjectID, participant.ID}
-	slices.SortFunc(userIDs, func(a, b primitive.ObjectID) int {
-		return strings.Compare(a.String(), b.String())
-	})
-	directKey := userIDs[0].String() + ":" + userIDs[1].String()
-
-	err = roomsCollection.FindOne(context.Background(), bson.M{
-		"type":       "direct",
-		"direct_key": directKey,
-		"is_active":  true,
-	}).Decode(&room)
-
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch room"})
-		}
-		return
-	}
-
-	roomResponse := models.RoomResponse{
-		ID:          room.ID,
-		DisplayName: room.Name,
-		Description: room.Description,
-		Type:        room.Type,
-		Picture:     room.Picture,
-		CreatedBy:   room.CreatedBy,
-		MemberCount: len(room.Members),
-		MaxMembers:  room.MaxMembers,
-		IsActive:    room.IsActive,
-		CreatedAt:   room.CreatedAt,
-		UpdatedAt:   room.UpdatedAt,
-	}
-
-	if room.Type == "direct" {
-		var otherMemberID primitive.ObjectID
-		for _, memberID := range room.Members {
-			if memberID != userObjectID {
-				otherMemberID = memberID
-				break
-			}
-		}
-
-		user, err := h.AuthService.GetUserByID(otherMemberID)
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info"})
-			return
-		}
-
-		roomResponse.DisplayName = user.Username
-		roomResponse.Picture = user.Picture
-	}
-
-	c.JSON(http.StatusOK, roomResponse)
-}
-
 func (h *RoomHandler) GetRooms(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
@@ -626,18 +541,33 @@ func (h *RoomHandler) GetMessages(c *gin.Context) {
 	defer cursor.Close(context.Background())
 
 	messages := []models.MessageResponse{}
+	users := make(map[primitive.ObjectID]*models.User)
+
 	for cursor.Next(context.Background()) {
 		var message models.Message
 		if err := cursor.Decode(&message); err != nil {
 			continue
 		}
 
+		user := users[message.UserID]
+		if user == nil {
+			user, err = h.AuthService.GetUserByID(message.UserID)
+			if err != nil {
+				user = &models.User{
+					ID:       message.UserID,
+					Username: "Desconhecido",
+				}
+			} else {
+				users[message.UserID] = user
+			}
+		}
+
 		messageResponse := models.MessageResponse{
 			ID:        message.ID,
 			RoomID:    message.RoomID,
 			UserID:    message.UserID,
-			Username:  message.Username,
-			Picture:   message.Picture,
+			Username:  user.Username,
+			Picture:   user.Picture,
 			Content:   message.Content,
 			Type:      message.Type,
 			FileURL:   message.FileURL,
@@ -647,113 +577,6 @@ func (h *RoomHandler) GetMessages(c *gin.Context) {
 			UpdatedAt: message.UpdatedAt,
 		}
 
-		if message.UserID == userObjectID {
-			messageResponse.IsOwnMessage = true
-		} else {
-			messageResponse.IsOwnMessage = false
-		}
-
-		messages = append(messages, messageResponse)
-	}
-
-	c.JSON(http.StatusOK, gin.H{
-		"data":  messages,
-		"page":  page,
-		"size":  limit,
-		"total": len(messages),
-	})
-}
-
-func (h *RoomHandler) GetDirectMessages(c *gin.Context) {
-	username := c.Param("username")
-	if username == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid username"})
-		return
-	}
-
-	userID, _ := c.Get("user_id")
-	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
-	if err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
-		return
-	}
-
-	user, err := h.AuthService.GetUserByUsername(username)
-	if err != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
-		return
-	}
-
-	roomsCollection := h.MongoService.GetCollection("rooms")
-	var roomDoc models.Room
-	err = roomsCollection.FindOne(context.Background(), bson.M{
-		"type":      "direct",
-		"members":   []primitive.ObjectID{userObjectID, user.ID},
-		"is_active": true,
-	}).Decode(&roomDoc)
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Direct message room not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch room"})
-		}
-		return
-	}
-
-	page := 1
-	limit := 50
-	if p := c.Query("page"); p != "" {
-		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
-			page = parsed
-		}
-	}
-	if l := c.Query("limit"); l != "" {
-		if parsed, err := strconv.Atoi(l); err == nil && parsed > 0 && parsed <= 100 {
-			limit = parsed
-		}
-	}
-
-	skip := (page - 1) * limit
-
-	messagesCollection := h.MongoService.GetCollection("messages")
-	filter := bson.M{
-		"room_id":    roomDoc.ID,
-		"is_deleted": false,
-	}
-
-	opts := options.Find().
-		SetSort(bson.D{{Key: "created_at", Value: -1}}).
-		SetSkip(int64(skip)).
-		SetLimit(int64(limit))
-
-	cursor, err := messagesCollection.Find(context.Background(), filter, opts)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch messages"})
-		return
-	}
-	defer cursor.Close(context.Background())
-
-	messages := []models.MessageResponse{}
-	for cursor.Next(context.Background()) {
-		var message models.Message
-		if err := cursor.Decode(&message); err != nil {
-			continue
-		}
-
-		messageResponse := models.MessageResponse{
-			ID:        message.ID,
-			RoomID:    message.RoomID,
-			UserID:    message.UserID,
-			Username:  message.Username,
-			Picture:   message.Picture,
-			Content:   message.Content,
-			Type:      message.Type,
-			FileURL:   message.FileURL,
-			ReplyTo:   message.ReplyTo,
-			IsEdited:  message.IsEdited,
-			CreatedAt: message.CreatedAt,
-			UpdatedAt: message.UpdatedAt,
-		}
 		if message.UserID == userObjectID {
 			messageResponse.IsOwnMessage = true
 		} else {

@@ -22,7 +22,7 @@ func main() {
 
 	mongoService := services.NewMongoService(cfg.MongoURI)
 	authService := services.NewAuthService(mongoService)
-	notificationService := services.NewNotificationService(mongoService)
+	notificationService := services.NewNotificationService(authService, mongoService)
 	chatService := services.NewChatService(mongoService, notificationService)
 
 	if err := mongoService.Connect(); err != nil {
@@ -74,11 +74,9 @@ func main() {
 		rooms.GET("/my-rooms", roomHandler.GetMyRooms)
 		rooms.POST("", roomHandler.CreateRoom)
 		rooms.GET("/:id", roomHandler.GetRoom)
-		rooms.GET("/direct/:username", roomHandler.GetDirectRoom)
 		rooms.POST("/:id/join", roomHandler.JoinRoom)
 		rooms.POST("/:id/leave", roomHandler.LeaveRoom)
 		rooms.GET("/:id/messages", roomHandler.GetMessages)
-		rooms.GET("/direct/:username/messages", roomHandler.GetDirectMessages)
 	}
 
 	notification := router.Group("/api/notifications")

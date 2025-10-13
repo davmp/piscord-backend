@@ -12,11 +12,13 @@ import (
 )
 
 type NotificationService struct {
+	AuthService  *AuthService
 	MongoService *MongoService
 }
 
-func NewNotificationService(mongoService *MongoService) *NotificationService {
+func NewNotificationService(authService *AuthService, mongoService *MongoService) *NotificationService {
 	return &NotificationService{
+		AuthService:  authService,
 		MongoService: mongoService,
 	}
 }
@@ -144,9 +146,17 @@ func (ns *NotificationService) responseNotification(notification models.Notifica
 	case models.NotificationTypeNewMessage:
 		var message models.Message
 		if err := ns.MongoService.GetCollection("messages").FindOne(context.Background(), bson.M{"_id": notification.ObjectID}).Decode(&message); err == nil {
-			notificationResponse.Title = "Nova mensagem de " + message.Username
+			user, err := ns.AuthService.GetUserByID(message.UserID)
+			if err != nil {
+				user = &models.User{
+					ID:       message.UserID,
+					Username: "Desconhecido",
+				}
+			}
+
+			notificationResponse.Title = "Nova mensagem de " + user.Username
 			notificationResponse.Link = "/chat/" + message.RoomID.Hex()
-			notificationResponse.Picture = message.Picture
+			notificationResponse.Picture = user.Picture
 
 			var room models.Room
 			if err := ns.MongoService.GetCollection("rooms").FindOne(context.Background(), bson.M{"_id": message.RoomID}).Decode(&room); err == nil {
@@ -158,7 +168,7 @@ func (ns *NotificationService) responseNotification(notification models.Notifica
 				} else {
 					content = strings.ReplaceAll(message.Content, "\n", " ")
 				}
-				notificationResponse.Content = message.Username + ": " + content
+				notificationResponse.Content = user.Username + ": " + content
 			}
 		}
 	case models.NotificationTypeUserJoined:
