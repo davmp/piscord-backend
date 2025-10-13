@@ -295,9 +295,6 @@ func (h *ChatHandler) handleSendMessage(client *services.Client, payload map[str
 		Type:    "message_sent",
 		Success: true,
 		Message: "Message sent successfully",
-		Data: map[string]any{
-			"is_own_message": true,
-		},
 	}
 	h.sendToClient(client, response)
 }

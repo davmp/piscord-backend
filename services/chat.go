@@ -224,6 +224,21 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		return err
 	}
 
+	messageResponse := models.MessageResponse{
+		ID:        message.ID,
+		RoomID:    message.RoomID,
+		UserID:    message.UserID,
+		Username:  client.Username,
+		Picture:   client.Picture,
+		Content:   message.Content,
+		Type:      message.Type,
+		FileURL:   message.FileURL,
+		ReplyTo:   message.ReplyTo,
+		IsEdited:  message.IsEdited,
+		CreatedAt: message.CreatedAt,
+		UpdatedAt: message.UpdatedAt,
+	}
+
 	cs.notificateGroupUsers(
 		roomID,
 		models.NotificationRequest{
@@ -239,7 +254,7 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 			Type:    "new_message",
 			Success: true,
 			Data: map[string]any{
-				"message":        message,
+				"message":        messageResponse,
 				"is_own_message": false,
 			},
 		},
@@ -250,8 +265,8 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		Type:    "new_message",
 		Success: true,
 		Data: map[string]any{
-			"message":        message,
-			"is_own_message": false,
+			"message":        messageResponse,
+			"is_own_message": true,
 		},
 	})
 
