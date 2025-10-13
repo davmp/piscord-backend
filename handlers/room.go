@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -203,8 +204,11 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 	var room models.Room
 	err = roomsCollection.FindOne(context.Background(), bson.M{
 		"_id":       roomObjectID,
-		"members":   userObjectID,
 		"is_active": true,
+		"$or": []bson.M{
+			{"members": userObjectID},
+			{"type": "public"},
+		},
 	}).Decode(&room)
 
 	if err != nil {
@@ -493,6 +497,8 @@ func (h *RoomHandler) JoinRoom(c *gin.Context) {
 		"_id":       roomObjectID,
 		"is_active": true,
 	}).Decode(&room)
+
+	log.Printf(">>> rooms: %s", roomObjectID.Hex())
 
 	if err != nil {
 		if err == mongo.ErrNoDocuments {
