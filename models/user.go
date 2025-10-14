@@ -22,7 +22,12 @@ type UserResponse struct {
 	Picture   string             `json:"picture,omitempty"`
 	Bio       string             `json:"bio,omitempty"`
 	CreatedAt time.Time          `json:"created_at"`
-	IsOnline  bool               `json:"is_online"`
+}
+
+type ProfileResponse struct {
+	UserResponse
+	IsOnline     bool                `json:"is_online"`
+	DirectChatID *primitive.ObjectID `json:"direct_chat_id,omitempty"`
 }
 
 type UpdateProfileRequest struct {

@@ -172,7 +172,6 @@ func (h *ChatHandler) handleMessage(client *services.Client, message []byte) {
 		h.handleLeaveRoom(client, payload)
 	case "send_message":
 		h.handleSendMessage(client, payload)
-		h.handleLeaveRoom(client, payload)
 	case "edit_message":
 		h.handleEditMessage(client, payload)
 	case "typing":

@@ -2,6 +2,8 @@ package handlers
 
 import (
 	"net/http"
+	"slices"
+	"strings"
 	"time"
 
 	"piscord-backend/config"
@@ -18,13 +20,15 @@ import (
 type AuthHandler struct {
 	AuthService *services.AuthService
 	ChatService *services.ChatService
+	RoomService *services.RoomService
 	Config      *config.Config
 }
 
-func NewAuthHandler(authService *services.AuthService, chatService *services.ChatService, config *config.Config) *AuthHandler {
+func NewAuthHandler(authService *services.AuthService, chatService *services.ChatService, roomService *services.RoomService, config *config.Config) *AuthHandler {
 	return &AuthHandler{
 		AuthService: authService,
 		ChatService: chatService,
+		RoomService: roomService,
 		Config:      config,
 	}
 }
@@ -78,7 +82,6 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		Picture:   user.Picture,
 		Bio:       user.Bio,
 		CreatedAt: user.CreatedAt,
-		IsOnline:  true,
 	}
 
 	c.JSON(http.StatusCreated, gin.H{
@@ -121,7 +124,6 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		Picture:   user.Picture,
 		Bio:       user.Bio,
 		CreatedAt: user.CreatedAt,
-		IsOnline:  h.ChatService.GetUserCurrentStatus(user.ID.Hex()),
 	}
 
 	c.JSON(http.StatusOK, gin.H{
@@ -159,7 +161,6 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 		Picture:   user.Picture,
 		Bio:       user.Bio,
 		CreatedAt: user.CreatedAt,
-		IsOnline:  h.ChatService.GetUserCurrentStatus(user.ID.Hex()),
 	}
 
 	c.JSON(http.StatusOK, userResponse)
@@ -173,8 +174,9 @@ func (h *AuthHandler) GetProfileByID(c *gin.Context) {
 		return
 	}
 
-	_, exists := c.Get("user_id")
-	if !exists {
+	userID, _ := c.Get("user_id")
+	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
+	if err != nil {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
 		return
 	}
@@ -189,16 +191,31 @@ func (h *AuthHandler) GetProfileByID(c *gin.Context) {
 		return
 	}
 
-	userResponse := models.UserResponse{
-		ID:        user.ID,
-		Username:  user.Username,
-		Picture:   user.Picture,
-		Bio:       user.Bio,
-		CreatedAt: user.CreatedAt,
-		IsOnline:  h.ChatService.GetUserCurrentStatus(user.ID.Hex()),
+	profileResponse := models.ProfileResponse{
+		UserResponse: models.UserResponse{
+			ID:        user.ID,
+			Username:  user.Username,
+			Picture:   user.Picture,
+			Bio:       user.Bio,
+			CreatedAt: user.CreatedAt,
+		},
+		IsOnline:     h.ChatService.GetUserStatus(user.ID.Hex()),
+		DirectChatID: nil,
 	}
 
-	c.JSON(http.StatusOK, userResponse)
+	if userObjectID != profileObjectID {
+		var userIDs = []primitive.ObjectID{userObjectID, profileObjectID}
+		slices.SortFunc(userIDs, func(a, b primitive.ObjectID) int {
+			return strings.Compare(a.String(), b.String())
+		})
+
+		room, _ := h.RoomService.GetRoomByDirectKey(userIDs[0].Hex() + ":" + userIDs[1].Hex())
+		if room != nil {
+			profileResponse.DirectChatID = &room.ID
+		}
+	}
+
+	c.JSON(http.StatusOK, profileResponse)
 }
 
 func (h *AuthHandler) UpdateProfile(c *gin.Context) {
@@ -263,7 +280,6 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		Picture:   user.Picture,
 		Bio:       user.Bio,
 		CreatedAt: user.CreatedAt,
-		IsOnline:  h.ChatService.GetUserCurrentStatus(user.ID.Hex()),
 	}
 
 	c.JSON(http.StatusOK, userResponse)

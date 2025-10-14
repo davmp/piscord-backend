@@ -37,12 +37,13 @@ type Hub struct {
 
 type ChatService struct {
 	Hub                 *Hub
+	RoomService         *RoomService
 	MongoService        *MongoService
 	NotificationService *NotificationService
 	AuthService         *AuthService
 }
 
-func NewChatService(mongoService *MongoService, notificationService *NotificationService, authService *AuthService) *ChatService {
+func NewChatService(roomService *RoomService, mongoService *MongoService, notificationService *NotificationService, authService *AuthService) *ChatService {
 	hub := &Hub{
 		Clients:    make(map[string]*Client),
 		Broadcast:  make(chan []byte, 256),
@@ -53,6 +54,7 @@ func NewChatService(mongoService *MongoService, notificationService *Notificatio
 
 	chatService := &ChatService{
 		Hub:                 hub,
+		RoomService:         roomService,
 		MongoService:        mongoService,
 		NotificationService: notificationService,
 		AuthService:         authService,
@@ -94,13 +96,8 @@ func (cs *ChatService) EnterRoom(client *Client, roomID string) error {
 		return err
 	}
 
-	roomsCollection := cs.MongoService.GetCollection("rooms")
-	count, err := roomsCollection.CountDocuments(context.Background(), bson.M{
-		"_id":       roomObjectID,
-		"members":   userObjectID,
-		"is_active": true,
-	})
-	if err != nil || count == 0 {
+	err = cs.RoomService.GetIsUserMember(roomObjectID, userObjectID)
+	if err != nil {
 		return err
 	}
 
@@ -126,11 +123,7 @@ func (cs *ChatService) JoinRoom(client *Client, roomID string) error {
 		return err
 	}
 
-	var room models.Room
-	err = cs.MongoService.GetCollection("rooms").FindOne(
-		context.Background(),
-		bson.M{"_id": roomObjectID, "is_active": true},
-	).Decode(&room)
+	_, err = cs.RoomService.GetRoomById(roomObjectID)
 	if err != nil {
 		return err
 	}
@@ -192,7 +185,7 @@ func (cs *ChatService) GetUserCurrentRoom(client *Client) string {
 	return ""
 }
 
-func (cs *ChatService) GetUserCurrentStatus(userID string) bool {
+func (cs *ChatService) GetUserStatus(userID string) bool {
 	client := cs.getClientSnapshot(userID)
 	return client != nil
 }
@@ -263,6 +256,8 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 			}
 		}
 	}
+
+	cs.notificateMessageGroupUsers(messageResponse)
 
 	cs.notificateGroupUsers(
 		roomID,
@@ -448,8 +443,7 @@ func (cs *ChatService) notificateGroupUsers(roomID string, req models.Notificati
 		return err
 	}
 
-	room := models.Room{}
-	err = cs.MongoService.GetCollection("rooms").FindOne(context.Background(), bson.M{"_id": roomObjectID}).Decode(&room)
+	room, err := cs.RoomService.GetRoomById(roomObjectID)
 	if err != nil {
 		return err
 	}
@@ -463,36 +457,70 @@ func (cs *ChatService) notificateGroupUsers(roomID string, req models.Notificati
 	cs.Hub.mutex.RUnlock()
 
 	usersOutOfRoom := make([]primitive.ObjectID, 0, len(room.Members))
-	for _, memberHex := range room.Members {
+	for _, memberID := range room.Members {
 		if roomMap == nil {
-			if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, memberHex)) {
-				usersOutOfRoom = append(usersOutOfRoom, memberHex)
+			if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, memberID)) {
+				usersOutOfRoom = append(usersOutOfRoom, memberID)
 			}
 			continue
 		}
 
-		if _, ok := roomMap[memberHex.Hex()]; !ok {
-			if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, memberHex)) {
-				usersOutOfRoom = append(usersOutOfRoom, memberHex)
+		if _, ok := roomMap[memberID.Hex()]; !ok {
+			if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, memberID)) {
+				usersOutOfRoom = append(usersOutOfRoom, memberID)
 			}
 		}
 	}
 
 	for _, userID := range usersOutOfRoom {
-		notification := models.Notification{
-			ID:        primitive.NewObjectID(),
-			UserID:    userID,
-			Content:   req.Content,
-			Type:      req.Type,
-			ObjectID:  req.ObjectID,
-			ReadAt:    nil,
-			CreatedAt: time.Now(),
-		}
+		if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, userID)) {
+			notification := models.Notification{
+				ID:        primitive.NewObjectID(),
+				UserID:    userID,
+				Content:   req.Content,
+				Type:      req.Type,
+				ObjectID:  req.ObjectID,
+				ReadAt:    nil,
+				CreatedAt: time.Now(),
+			}
 
-		if err := cs.NotificationService.CreateNotification(&notification); err != nil {
-			return err
-		}
+			if err := cs.NotificationService.CreateNotification(&notification); err != nil {
+				return err
+			}
 
+			memberHex := userID.Hex()
+			client := cs.getClientSnapshot(memberHex)
+
+			if client == nil {
+				continue
+			}
+
+			cs.sendToClient(client, models.WSResponse{
+				Type:    "notification",
+				Success: true,
+				Data: map[string]any{
+					"id":        notification.ID.Hex(),
+					"type":      notification.Type,
+					"object_id": notification.ObjectID.Hex(),
+				},
+			})
+		}
+	}
+
+	return nil
+}
+
+func (cs *ChatService) notificateMessageGroupUsers(message models.MessageResponse) error {
+	room, err := cs.RoomService.GetRoomById(message.RoomID)
+	if err != nil {
+		return err
+	}
+
+	if len(room.Members) == 0 {
+		return nil
+	}
+
+	for _, userID := range room.Members {
 		memberHex := userID.Hex()
 		client := cs.getClientSnapshot(memberHex)
 
@@ -501,13 +529,9 @@ func (cs *ChatService) notificateGroupUsers(roomID string, req models.Notificati
 		}
 
 		cs.sendToClient(client, models.WSResponse{
-			Type:    "notification",
+			Type:    "message_notification",
 			Success: true,
-			Data: map[string]any{
-				"id":        notification.ID.Hex(),
-				"type":      notification.Type,
-				"object_id": notification.ObjectID.Hex(),
-			},
+			Data:    message,
 		})
 	}
 

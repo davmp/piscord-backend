@@ -2,7 +2,6 @@ package handlers
 
 import (
 	"context"
-	"log"
 	"net/http"
 	"slices"
 	"strconv"
@@ -53,6 +52,10 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		}
 	}
 
+	if req.Name == "" {
+		req.Name = "Desconhecido"
+	}
+
 	room := models.Room{
 		ID:          primitive.NewObjectID(),
 		Name:        req.Name,
@@ -82,7 +85,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		slices.SortFunc(userIDs, func(a, b primitive.ObjectID) int {
 			return strings.Compare(a.String(), b.String())
 		})
-		room.DirectKey = userIDs[0].String() + ":" + userIDs[1].String()
+		room.DirectKey = userIDs[0].Hex() + ":" + userIDs[1].Hex()
 
 		var existing models.Room
 		err = roomsCollection.FindOne(context.Background(), bson.M{
@@ -102,6 +105,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 				MemberCount: len(existing.Members),
 				MaxMembers:  existing.MaxMembers,
 				IsActive:    existing.IsActive,
+				IsAdmin:     slices.Contains(existing.Admins, userObjectID),
 				CreatedAt:   existing.CreatedAt,
 				UpdatedAt:   existing.UpdatedAt,
 			}
@@ -160,6 +164,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		MemberCount: len(room.Members),
 		MaxMembers:  room.MaxMembers,
 		IsActive:    room.IsActive,
+		IsAdmin:     slices.Contains(room.Admins, userObjectID),
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
 	}
@@ -230,6 +235,7 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 		MemberCount: len(room.Members),
 		MaxMembers:  room.MaxMembers,
 		IsActive:    room.IsActive,
+		IsAdmin:     slices.Contains(room.Admins, userObjectID),
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
 	}
@@ -256,6 +262,62 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 	c.JSON(http.StatusOK, roomResponse)
 }
 
+func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
+	participantID := c.Param("id")
+	participantObjectID, err := primitive.ObjectIDFromHex(participantID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room ID"})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	var userIDs = []primitive.ObjectID{userObjectID, participantObjectID}
+	slices.SortFunc(userIDs, func(a, b primitive.ObjectID) int {
+		return strings.Compare(a.String(), b.String())
+	})
+	directKey := userIDs[0].Hex() + ":" + userIDs[1].Hex()
+
+	roomsCollection := h.MongoService.GetCollection("rooms")
+	var room models.Room
+	err = roomsCollection.FindOne(context.Background(), bson.M{
+		"is_active":  true,
+		"direct_key": directKey,
+		"type":       "direct",
+	}).Decode(&room)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch room"})
+		}
+		return
+	}
+
+	roomResponse := models.RoomResponse{
+		ID:          room.ID,
+		DisplayName: room.Name,
+		Description: room.Description,
+		Type:        room.Type,
+		Picture:     room.Picture,
+		CreatedBy:   room.CreatedBy,
+		MemberCount: 2,
+		MaxMembers:  2,
+		IsActive:    room.IsActive,
+		IsAdmin:     false,
+		CreatedAt:   room.CreatedAt,
+		UpdatedAt:   room.UpdatedAt,
+	}
+
+	c.JSON(http.StatusOK, roomResponse)
+}
+
 func (h *RoomHandler) GetRooms(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
@@ -274,7 +336,9 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 		filter["name"] = bson.M{"$regex": search, "$options": "i"}
 	}
 
-	cursor, err := roomsCollection.Find(context.Background(), filter)
+	opt := options.Find().SetSort(bson.D{{Key: "member_count", Value: 1}})
+
+	cursor, err := roomsCollection.Find(context.Background(), filter, opt)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch rooms"})
 		return
@@ -290,17 +354,20 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 		}
 
 		roomResponse := models.PublicRoomResponse{
-			ID:          room.ID,
-			Description: room.Description,
-			Type:        room.Type,
-			Picture:     room.Picture,
-			CreatedBy:   room.CreatedBy,
-			MemberCount: len(room.Members),
-			MaxMembers:  room.MaxMembers,
-			IsActive:    room.IsActive,
-			CreatedAt:   room.CreatedAt,
-			UpdatedAt:   room.UpdatedAt,
-
+			RoomResponse: models.RoomResponse{
+				ID:          room.ID,
+				Description: room.Description,
+				Type:        room.Type,
+				Picture:     room.Picture,
+				CreatedBy:   room.CreatedBy,
+				MemberCount: len(room.Members),
+				MaxMembers:  room.MaxMembers,
+				IsActive:    room.IsActive,
+				IsAdmin:     slices.Contains(room.Admins, userObjectID),
+				CreatedAt:   room.CreatedAt,
+				UpdatedAt:   room.UpdatedAt,
+				LastMessage: nil,
+			},
 			DisplayName: room.Name,
 			IsMember:    !userObjectID.IsZero() && slices.Contains(room.Members, userObjectID),
 		}
@@ -341,7 +408,7 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 	}
 	defer cursor.Close(context.Background())
 
-	roomsWithMessages := []models.RoomResponse{}
+	rooms := []models.RoomResponse{}
 
 	for cursor.Next(context.Background()) {
 		var room models.Room
@@ -359,8 +426,10 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 			MemberCount: len(room.Members),
 			MaxMembers:  room.MaxMembers,
 			IsActive:    room.IsActive,
+			IsAdmin:     slices.Contains(room.Admins, userObjectID),
 			CreatedAt:   room.CreatedAt,
 			UpdatedAt:   room.UpdatedAt,
+			LastMessage: nil,
 		}
 
 		if room.Type == "direct" {
@@ -382,12 +451,54 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 			roomResponse.Picture = user.Picture
 		}
 
-		roomsWithMessages = append(roomsWithMessages, roomResponse)
+		var message *models.Message = nil
+		messageCursor, err := h.MongoService.GetCollection("messages").Find(
+			context.Background(),
+			bson.M{
+				"room_id":    room.ID,
+				"is_deleted": false,
+			},
+			options.Find().SetSort(bson.D{{Key: "created_at", Value: -1}}).SetLimit(1),
+		)
+		if err == nil && messageCursor.Next(context.Background()) {
+			var lastMessage models.Message
+			if err := messageCursor.Decode(&lastMessage); err == nil {
+				message = &lastMessage
+			}
+		}
+		messageCursor.Close(context.Background())
+
+		if err == nil && message != nil {
+			user, err := h.AuthService.GetUserByID(message.UserID)
+
+			if err == nil {
+				roomResponse.LastMessage = &models.MessagePreviewResponse{
+					ID:        message.ID,
+					Username:  user.Username,
+					Picture:   user.Picture,
+					Content:   message.Content,
+					CreatedAt: message.CreatedAt,
+				}
+			}
+		}
+
+		rooms = append(rooms, roomResponse)
 	}
 
+	slices.SortFunc(rooms, func(a, b models.RoomResponse) int {
+		var aTime, bTime time.Time
+		if a.LastMessage != nil {
+			aTime = a.LastMessage.CreatedAt
+		}
+		if b.LastMessage != nil {
+			bTime = b.LastMessage.CreatedAt
+		}
+		return bTime.Compare(aTime)
+	})
+
 	c.JSON(http.StatusOK, gin.H{
-		"data":  roomsWithMessages,
-		"total": len(roomsWithMessages),
+		"data":  rooms,
+		"total": len(rooms),
 	})
 }
 
@@ -412,8 +523,6 @@ func (h *RoomHandler) JoinRoom(c *gin.Context) {
 		"_id":       roomObjectID,
 		"is_active": true,
 	}).Decode(&room)
-
-	log.Printf(">>> rooms: %s", roomObjectID.Hex())
 
 	if err != nil {
 		if err == mongo.ErrNoDocuments {

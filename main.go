@@ -22,8 +22,9 @@ func main() {
 
 	mongoService := services.NewMongoService(cfg.MongoURI)
 	authService := services.NewAuthService(mongoService)
+	roomService := services.NewRoomService(authService, mongoService)
 	notificationService := services.NewNotificationService(authService, mongoService)
-	chatService := services.NewChatService(mongoService, notificationService, authService)
+	chatService := services.NewChatService(roomService, mongoService, notificationService, authService)
 
 	if err := mongoService.Connect(); err != nil {
 		log.Fatal("Error connecting to MongoDB: ", err)
@@ -46,7 +47,7 @@ func main() {
 		MaxAge:           12 * time.Hour,
 	}))
 
-	authHandler := handlers.NewAuthHandler(authService, chatService, cfg)
+	authHandler := handlers.NewAuthHandler(authService, chatService, roomService, cfg)
 	chatHandler := handlers.NewChatHandler(chatService, cfg)
 	roomHandler := handlers.NewRoomHandler(mongoService, authService)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
@@ -74,6 +75,7 @@ func main() {
 		rooms.GET("/my-rooms", roomHandler.GetMyRooms)
 		rooms.POST("", roomHandler.CreateRoom)
 		rooms.GET("/:id", roomHandler.GetRoom)
+		rooms.GET("/direct/:id", roomHandler.GetDirectRoom)
 		rooms.POST("/:id/join", roomHandler.JoinRoom)
 		rooms.POST("/:id/leave", roomHandler.LeaveRoom)
 		rooms.GET("/:id/messages", roomHandler.GetMessages)
