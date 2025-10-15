@@ -102,7 +102,6 @@ func (ns *NotificationService) MarkNotificationAsRead(notificationID, userID pri
 		bson.M{
 			"$set": bson.M{
 				"read_at": time.Now(),
-				"content": "Você recebeu uma notificação",
 			},
 		},
 	)
@@ -161,15 +160,20 @@ func (ns *NotificationService) responseNotification(notification models.Notifica
 
 			var room models.Room
 			if err := ns.MongoService.GetCollection("rooms").FindOne(context.Background(), bson.M{"_id": message.RoomID}).Decode(&room); err == nil {
-				notificationResponse.Title = fmt.Sprintf("Nova mensagem em %s", room.Name)
-
 				var content string
 				if len(message.Content) > 50 {
 					content = strings.ReplaceAll(message.Content[:50], "\n", " ")
 				} else {
 					content = strings.ReplaceAll(message.Content, "\n", " ")
 				}
-				notificationResponse.Content = fmt.Sprintf("%s: %s", user.Username, content)
+
+				if room.Type == "direct" {
+					notificationResponse.Title = fmt.Sprintf("Nova mensagem de %s", user.Username)
+					notificationResponse.Content = content
+				} else {
+					notificationResponse.Title = fmt.Sprintf("Nova mensagem em %s", room.Name)
+					notificationResponse.Content = fmt.Sprintf("%s: %s", user.Username, content)
+				}
 			}
 		}
 	case models.NotificationTypeUserJoined:
