@@ -3,6 +3,7 @@ package services
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log"
 	"runtime/debug"
 	"slices"
@@ -325,6 +326,25 @@ func (cs *ChatService) EditMessage(client *Client, roomID, messageID, content st
 	)
 
 	return err
+}
+
+func (cs *ChatService) UpdateClient(userID, username, picture string) error {
+	client := cs.getClientSnapshot(userID)
+
+	if client == nil {
+		return errors.New("invalid client")
+	}
+
+	cs.Hub.mutex.Lock()
+	if username != "" {
+		client.Username = username
+	}
+	if picture != "" {
+		client.Picture = picture
+	}
+	cs.Hub.mutex.Unlock()
+
+	return nil
 }
 
 func (cs *ChatService) registerClient(client *Client) {

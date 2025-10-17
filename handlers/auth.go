@@ -252,6 +252,7 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		}
 
 		update["username"] = req.Username
+		c.Set("username", req.Username)
 	}
 
 	if req.Bio != "" {
@@ -269,6 +270,12 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 	}
 
 	user, err := h.AuthService.UpdateUser(userObjectID, update)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user record"})
+		return
+	}
+
+	err = h.ChatService.UpdateClient(userObjectID.Hex(), req.Username, req.Picture)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user record"})
 		return
