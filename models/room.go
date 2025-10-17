@@ -27,8 +27,17 @@ type CreateRoomRequest struct {
 	Description    string   `json:"description,omitempty"`
 	Type           string   `json:"type" binding:"required,oneof=private public direct"`
 	Picture        string   `json:"picture,omitempty"`
-	MaxMembers     int      `json:"max_members,omitempty"`
+	MaxMembers     int      `json:"max_members,omitempty" binding:"max=100"`
 	ParticipantIDs []string `json:"participant_ids,omitempty"`
+}
+
+type UpdateRoomRequest struct {
+	Name                 string   `json:"name,omitempty" binding:"max=50"`
+	Description          string   `json:"description,omitempty"`
+	Picture              string   `json:"picture,omitempty"`
+	MaxMembers           int      `json:"max_members,omitempty" binding:"max=100"`
+	AddParticipantIDs    []string `json:"add_participant_ids,omitempty"`
+	RemoveParticipantIDs []string `json:"remove_participant_ids,omitempty"`
 }
 
 type RoomResponse struct {

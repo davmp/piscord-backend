@@ -380,6 +380,100 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 	})
 }
 
+func (h *RoomHandler) UpdateRoom(c *gin.Context) {
+	var req models.UpdateRoomRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	roomID := c.Param("id")
+	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room ID"})
+		return
+	}
+
+	userID, _ := c.Get("user_id")
+	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	roomsCollection := h.MongoService.GetCollection("rooms")
+	var room models.Room
+	err = roomsCollection.FindOne(context.Background(), bson.M{
+		"_id":    roomObjectID,
+		"admins": userObjectID,
+	}).Decode(&room)
+
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch room"})
+		}
+		return
+	}
+
+	updateFields := bson.M{}
+
+	if req.Name != "" && req.Name != room.Name {
+		room.Name = req.Name
+		updateFields["name"] = room.Name
+	}
+	if req.Description != "" && req.Description != room.Description {
+		room.Description = req.Description
+		updateFields["description"] = room.Description
+	}
+	if req.Picture != "" && req.Picture != room.Picture {
+		room.Picture = req.Picture
+		updateFields["picture"] = room.Picture
+	}
+
+	if len(req.AddParticipantIDs) > 0 || len(req.RemoveParticipantIDs) > 0 {
+		updateFields["members"] = room.Members
+	}
+	if req.MaxMembers != 0 && req.MaxMembers != room.MaxMembers {
+		if req.MaxMembers >= len(room.Members) {
+			room.MaxMembers = req.MaxMembers
+			updateFields["max_members"] = room.MaxMembers
+		}
+	}
+
+	if len(updateFields) == 0 {
+		c.JSON(http.StatusOK, gin.H{"message": "No changes made"})
+		return
+	}
+
+	room.UpdatedAt = time.Now()
+	updateFields["updated_at"] = room.UpdatedAt
+
+	_, err = roomsCollection.UpdateByID(context.Background(), room.ID, bson.M{"$set": updateFields})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update room"})
+		return
+	}
+
+	roomResponse := models.RoomResponse{
+		ID:          room.ID,
+		DisplayName: room.Name,
+		Type:        room.Type,
+		Picture:     room.Picture,
+		Description: room.Description,
+		CreatedBy:   room.CreatedBy,
+		MemberCount: len(room.Members),
+		MaxMembers:  room.MaxMembers,
+		IsActive:    room.IsActive,
+		IsAdmin:     slices.Contains(room.Admins, userObjectID),
+		CreatedAt:   room.CreatedAt,
+		UpdatedAt:   room.UpdatedAt,
+	}
+
+	c.JSON(http.StatusOK, roomResponse)
+}
+
 func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 	userID, _ := c.Get("user_id")
 	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
