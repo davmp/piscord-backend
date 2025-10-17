@@ -431,9 +431,16 @@ func (h *RoomHandler) UpdateRoom(c *gin.Context) {
 		room.Picture = req.Picture
 		updateFields["picture"] = room.Picture
 	}
+	if len(req.RemoveParticipantIDs) > 0 {
+		members := []primitive.ObjectID{}
 
-	if len(req.AddParticipantIDs) > 0 || len(req.RemoveParticipantIDs) > 0 {
-		updateFields["members"] = room.Members
+		for _, pid := range room.Members {
+			if !slices.Contains(req.RemoveParticipantIDs, pid.Hex()) {
+				members = append(members, pid)
+			}
+		}
+
+		updateFields["members"] = members
 	}
 	if req.MaxMembers != 0 && req.MaxMembers != room.MaxMembers {
 		if req.MaxMembers >= len(room.Members) {

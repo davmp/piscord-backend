@@ -36,7 +36,6 @@ type UpdateRoomRequest struct {
 	Description          string   `json:"description,omitempty"`
 	Picture              string   `json:"picture,omitempty"`
 	MaxMembers           int      `json:"max_members,omitempty" binding:"max=100"`
-	AddParticipantIDs    []string `json:"add_participant_ids,omitempty"`
 	RemoveParticipantIDs []string `json:"remove_participant_ids,omitempty"`
 }
 
