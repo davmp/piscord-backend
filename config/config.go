@@ -2,8 +2,6 @@ package config
 
 import (
 	"os"
-
-	"github.com/joho/godotenv"
 )
 
 type Config struct {
@@ -13,12 +11,10 @@ type Config struct {
 }
 
 func Load() *Config {
-	godotenv.Load()
-
 	return &Config{
-		Port:      getEnv("PORT", "8000"),
-		MongoURI:  getEnv("MONGO_URI", "mongodb://localhost:27017/piscord"),
-		JWTSecret: getEnv("JWT_SECRET", "your-secret-key"),
+		Port:      getEnv("PORT", ""),
+		MongoURI:  getEnv("MONGO_URI", ""),
+		JWTSecret: getEnv("JWT_SECRET", ""),
 	}
 }
 
