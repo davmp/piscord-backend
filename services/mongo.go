@@ -38,7 +38,7 @@ func (m *MongoService) Connect() error {
 	m.client = client
 	m.database = client.Database("piscord")
 
-	m.createIndexes()
+	// m.createIndexes()
 
 	return nil
 }
@@ -60,37 +60,37 @@ func (m *MongoService) GetCollection(name string) *mongo.Collection {
 	return m.database.Collection(name)
 }
 
-func (m *MongoService) createIndexes() {
-	ctx := context.Background()
+// func (m *MongoService) createIndexes() {
+// 	ctx := context.Background()
 
-	// Users collection indexes
-	usersCollection := m.GetCollection("users")
-	usersCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    map[string]interface{}{"username": 1},
-		Options: options.Index().SetUnique(true),
-	})
+// 	// Users collection indexes
+// 	usersCollection := m.GetCollection("users")
+// 	usersCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+// 		Keys:    map[string]any{"username": 1},
+// 		Options: options.Index().SetUnique(true),
+// 	})
 
-	// Messages collection indexes
-	messagesCollection := m.GetCollection("messages")
-	messagesCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: map[string]interface{}{"room_id": 1, "created_at": -1},
-	})
-	messagesCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: map[string]interface{}{"user_id": 1},
-	})
+// 	// Messages collection indexes
+// 	messagesCollection := m.GetCollection("messages")
+// 	messagesCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+// 		Keys: map[string]any{"room_id": 1, "created_at": -1},
+// 	})
+// 	messagesCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+// 		Keys: map[string]any{"user_id": 1},
+// 	})
 
-	// Rooms collection indexes
-	roomsCollection := m.GetCollection("rooms")
-	roomsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: map[string]interface{}{"created_by": 1},
-	})
-	roomsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: map[string]interface{}{"members": 1},
-	})
+// 	// Rooms collection indexes
+// 	roomsCollection := m.GetCollection("rooms")
+// 	roomsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+// 		Keys: map[string]any{"created_by": 1},
+// 	})
+// 	roomsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+// 		Keys: map[string]any{"members": 1},
+// 	})
 
-	// Notifications collection indexes
-	notificationsCollection := m.GetCollection("notifications")
-	notificationsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys: map[string]any{"user_id": 1, "created_at": -1},
-	})
-}
+// 	// Notifications collection indexes
+// 	notificationsCollection := m.GetCollection("notifications")
+// 	notificationsCollection.Indexes().CreateOne(ctx, mongo.IndexModel{
+// 		Keys: map[string]any{"user_id": 1, "created_at": -1},
+// 	})
+// }

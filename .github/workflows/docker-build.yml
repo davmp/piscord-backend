@@ -1,4 +1,4 @@
-name: Build & Publish Backend SSR Image
+name: Build & Publish Backend Image
 
 on:
   push:

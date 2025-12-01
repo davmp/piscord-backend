@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"log"
 	"runtime/debug"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -42,9 +44,10 @@ type ChatService struct {
 	MongoService        *MongoService
 	NotificationService *NotificationService
 	AuthService         *AuthService
+	RedisService        *RedisService
 }
 
-func NewChatService(roomService *RoomService, mongoService *MongoService, notificationService *NotificationService, authService *AuthService) *ChatService {
+func NewChatService(roomService *RoomService, mongoService *MongoService, notificationService *NotificationService, authService *AuthService, redisService *RedisService) *ChatService {
 	hub := &Hub{
 		Clients:    make(map[string]*Client),
 		Broadcast:  make(chan []byte, 256),
@@ -59,6 +62,7 @@ func NewChatService(roomService *RoomService, mongoService *MongoService, notifi
 		MongoService:        mongoService,
 		NotificationService: notificationService,
 		AuthService:         authService,
+		RedisService:        redisService,
 	}
 
 	go chatService.Run()
@@ -124,7 +128,7 @@ func (cs *ChatService) JoinRoom(client *Client, roomID string) error {
 		return err
 	}
 
-	_, err = cs.RoomService.GetRoomById(roomObjectID)
+	room, err := cs.RoomService.GetRoomById(roomObjectID)
 	if err != nil {
 		return err
 	}
@@ -156,14 +160,8 @@ func (cs *ChatService) JoinRoom(client *Client, roomID string) error {
 		},
 	}
 
-	notification := models.NotificationRequest{
-		Content:  client.Username,
-		Type:     models.NotificationTypeUserJoined,
-		ObjectID: &roomObjectID,
-	}
-
 	cs.broadcastToRoomExcept(roomID, message, client)
-	cs.notificateGroupUsers(roomID, notification)
+	cs.notifyUserJoined(room, client)
 
 	return nil
 }
@@ -197,9 +195,18 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		return err
 	}
 
+	room, err := cs.RoomService.GetRoomById(roomObjectID)
+	if err != nil {
+		return err
+	}
+
 	userObjectID, err := primitive.ObjectIDFromHex(client.UserID)
 	if err != nil {
 		return err
+	}
+
+	if !slices.Contains(room.Members, userObjectID) {
+		return errors.New("user is not a member of this room")
 	}
 
 	message := models.Message{
@@ -220,10 +227,7 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		message.ReplyTo = replyTo
 	}
 
-	_, err = cs.MongoService.GetCollection("messages").InsertOne(context.Background(), message)
-	if err != nil {
-		return err
-	}
+	cs.RedisService.Publish("chat", "message.create", message)
 
 	messageResponse := models.MessageResponse{
 		ID:        message.ID,
@@ -258,17 +262,8 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		}
 	}
 
-	cs.notificateMessage(messageResponse)
-
-	cs.notificateMessageGroupUsers(
-		roomID,
-		messageResponse,
-		models.NotificationRequest{
-			Content:  content,
-			Type:     models.NotificationTypeNewMessage,
-			ObjectID: &message.ID,
-		},
-	)
+	cs.notifyMessage(messageResponse)
+	cs.notifyMessageGroupUsers(room, messageResponse)
 
 	cs.broadcastToRoomExcept(
 		roomID,
@@ -418,6 +413,11 @@ func (cs *ChatService) leaveRoomInternal(client *Client, roomID string) {
 		return
 	}
 
+	room, err := cs.RoomService.GetRoomById(roomObjectID)
+	if err != nil {
+		return
+	}
+
 	cs.Hub.mutex.Lock()
 
 	if room, exists := cs.Hub.Rooms[roomID]; exists {
@@ -431,14 +431,7 @@ func (cs *ChatService) leaveRoomInternal(client *Client, roomID string) {
 
 	delete(client.Rooms, roomID)
 
-	cs.notificateGroupUsers(
-		roomID,
-		models.NotificationRequest{
-			Content:  client.Username,
-			Type:     models.NotificationTypeUserLeft,
-			ObjectID: &roomObjectID,
-		},
-	)
+	cs.notifyUserLeft(room, client)
 
 	notification := models.WSResponse{
 		Type:    "user_left",
@@ -458,23 +451,9 @@ func (cs *ChatService) leaveRoomInternal(client *Client, roomID string) {
 	}
 }
 
-func (cs *ChatService) notificateGroupUsers(roomID string, req models.NotificationRequest) error {
-	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
-	if err != nil {
-		return err
-	}
-
-	room, err := cs.RoomService.GetRoomById(roomObjectID)
-	if err != nil {
-		return err
-	}
-
-	if len(room.Members) == 0 {
-		return nil
-	}
-
+func (cs *ChatService) notifyUserLeft(room *models.Room, client *Client) error {
 	cs.Hub.mutex.RLock()
-	roomMap := cs.Hub.Rooms[roomID]
+	roomMap := cs.Hub.Rooms[room.ID.Hex()]
 	cs.Hub.mutex.RUnlock()
 
 	usersOutOfRoom := make([]primitive.ObjectID, 0, len(room.Members))
@@ -498,10 +477,11 @@ func (cs *ChatService) notificateGroupUsers(roomID string, req models.Notificati
 			notification := models.Notification{
 				ID:        primitive.NewObjectID(),
 				UserID:    userID,
-				Content:   req.Content,
-				Type:      req.Type,
-				ObjectID:  req.ObjectID,
-				ReadAt:    nil,
+				Title:     fmt.Sprintf("%s saiu da sala", client.Username),
+				Body:      fmt.Sprintf("O usuário %s saiu da sala %s", client.Username, room.Name),
+				Picture:   client.Picture,
+				Type:      models.NotificationTypeUserLeft,
+				IsRead:    false,
 				CreatedAt: time.Now(),
 			}
 
@@ -520,9 +500,8 @@ func (cs *ChatService) notificateGroupUsers(roomID string, req models.Notificati
 				Type:    "notification",
 				Success: true,
 				Data: map[string]any{
-					"id":        notification.ID.Hex(),
-					"type":      notification.Type,
-					"object_id": notification.ObjectID.Hex(),
+					"id":   notification.ID.Hex(),
+					"type": notification.Type,
 				},
 			})
 		}
@@ -531,23 +510,72 @@ func (cs *ChatService) notificateGroupUsers(roomID string, req models.Notificati
 	return nil
 }
 
-func (cs *ChatService) notificateMessageGroupUsers(roomID string, message models.MessageResponse, req models.NotificationRequest) error {
-	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
-	if err != nil {
-		return err
+func (cs *ChatService) notifyUserJoined(room *models.Room, client *Client) error {
+	cs.Hub.mutex.RLock()
+	roomMap := cs.Hub.Rooms[room.ID.Hex()]
+	cs.Hub.mutex.RUnlock()
+
+	usersOutOfRoom := make([]primitive.ObjectID, 0, len(room.Members))
+	for _, memberID := range room.Members {
+		if roomMap == nil {
+			if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, memberID)) {
+				usersOutOfRoom = append(usersOutOfRoom, memberID)
+			}
+			continue
+		}
+
+		if _, ok := roomMap[memberID.Hex()]; !ok {
+			if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, memberID)) {
+				usersOutOfRoom = append(usersOutOfRoom, memberID)
+			}
+		}
 	}
 
-	room, err := cs.RoomService.GetRoomById(roomObjectID)
-	if err != nil {
-		return err
+	for _, userID := range usersOutOfRoom {
+		if room.Type != "public" || (room.Type == "public" && slices.Contains(room.Admins, userID)) {
+			notification := models.Notification{
+				ID:        primitive.NewObjectID(),
+				UserID:    userID,
+				Title:     fmt.Sprintf("%s entrou na sala", client.Username),
+				Body:      fmt.Sprintf("Um novo usuário %s entrou em %s", client.Username, room.Name),
+				Picture:   client.Picture,
+				Type:      "user_joined",
+				IsRead:    false,
+				CreatedAt: time.Now(),
+			}
+
+			if err := cs.NotificationService.CreateNotification(&notification); err != nil {
+				return err
+			}
+
+			memberHex := userID.Hex()
+			client := cs.getClientSnapshot(memberHex)
+
+			if client == nil {
+				continue
+			}
+
+			cs.sendToClient(client, models.WSResponse{
+				Type:    "notification",
+				Success: true,
+				Data: map[string]any{
+					"id":   notification.ID.Hex(),
+					"type": notification.Type,
+				},
+			})
+		}
 	}
 
+	return nil
+}
+
+func (cs *ChatService) notifyMessageGroupUsers(room *models.Room, message models.MessageResponse) error {
 	if len(room.Members) == 0 {
 		return nil
 	}
 
 	cs.Hub.mutex.RLock()
-	roomMap := cs.Hub.Rooms[roomID]
+	roomMap := cs.Hub.Rooms[room.ID.Hex()]
 	cs.Hub.mutex.RUnlock()
 
 	usersToNotify := make(map[primitive.ObjectID]struct{}, len(room.Members))
@@ -567,14 +595,26 @@ func (cs *ChatService) notificateMessageGroupUsers(roomID string, message models
 		}
 	}
 
+	var title string
+	var body string
+	if room.Type == "direct" {
+		title = fmt.Sprintf("Nova mensagem de %s", message.Username)
+		body = strings.ReplaceAll(message.Content, "\n", " ")
+	} else {
+		title = fmt.Sprintf("Nova mensagem em %s", room.Name)
+		body = fmt.Sprintf("%s: %s", message.Username, strings.ReplaceAll(message.Content, "\n", " "))
+	}
+
 	for userID := range usersToNotify {
 		notification := models.Notification{
 			ID:        primitive.NewObjectID(),
 			UserID:    userID,
-			Content:   req.Content,
-			Type:      req.Type,
-			ObjectID:  req.ObjectID,
-			ReadAt:    nil,
+			Title:     title,
+			Body:      body,
+			Type:      models.NotificationTypeNewMessage,
+			Link:      fmt.Sprintf("/chat/%s", room.ID.Hex()),
+			Picture:   message.Picture,
+			IsRead:    false,
 			CreatedAt: time.Now(),
 		}
 
@@ -588,9 +628,8 @@ func (cs *ChatService) notificateMessageGroupUsers(roomID string, message models
 				Type:    "notification",
 				Success: true,
 				Data: map[string]any{
-					"id":        notification.ID.Hex(),
-					"type":      notification.Type,
-					"object_id": notification.ObjectID.Hex(),
+					"id":   notification.ID.Hex(),
+					"type": notification.Type,
 				},
 			})
 		}
@@ -599,7 +638,7 @@ func (cs *ChatService) notificateMessageGroupUsers(roomID string, message models
 	return nil
 }
 
-func (cs *ChatService) notificateMessage(message models.MessageResponse) error {
+func (cs *ChatService) notifyMessage(message models.MessageResponse) error {
 	room, err := cs.RoomService.GetRoomById(message.RoomID)
 	if err != nil {
 		return err

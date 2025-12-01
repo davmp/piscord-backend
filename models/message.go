@@ -7,17 +7,17 @@ import (
 )
 
 type Message struct {
-	ID        primitive.ObjectID  `bson:"_id,omitempty" json:"id"`
-	RoomID    primitive.ObjectID  `bson:"room_id" json:"room_id"`
-	UserID    primitive.ObjectID  `bson:"user_id" json:"user_id"`
-	Content   string              `bson:"content" json:"content"`
-	Type      string              `bson:"type" json:"type"` // "text", "image", "file", "system"
-	FileURL   string              `bson:"file_url,omitempty" json:"file_url,omitempty"`
-	ReplyTo   *primitive.ObjectID `bson:"reply_to,omitempty" json:"reply_to,omitempty"`
-	IsEdited  bool                `bson:"is_edited" json:"is_edited"`
-	IsDeleted bool                `bson:"is_deleted" json:"is_deleted"`
-	CreatedAt time.Time           `bson:"created_at" json:"created_at"`
-	UpdatedAt time.Time           `bson:"updated_at" json:"updated_at"`
+	ID        primitive.ObjectID  `json:"id"`
+	RoomID    primitive.ObjectID  `json:"room_id"`
+	UserID    primitive.ObjectID  `json:"user_id"`
+	Content   string              `json:"content"`
+	Type      string              `json:"type"` // "text", "image", "file", "system"
+	FileURL   string              `json:"file_url,omitempty"`
+	ReplyTo   *primitive.ObjectID `json:"reply_to,omitempty"`
+	IsEdited  bool                `json:"is_edited"`
+	IsDeleted bool                `json:"is_deleted"`
+	CreatedAt time.Time           `json:"created_at"`
+	UpdatedAt time.Time           `json:"updated_at"`
 }
 
 type SendMessageRequest struct {

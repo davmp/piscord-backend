@@ -7,19 +7,19 @@ import (
 )
 
 type Room struct {
-	ID          primitive.ObjectID   `bson:"_id,omitempty" json:"id"`
-	Name        string               `bson:"name,omitempty" json:"name,omitempty" binding:"max=50"`
-	Description string               `bson:"description,omitempty" json:"description,omitempty"`
-	Type        string               `bson:"type" json:"type" binding:"required,oneof=private public direct"`
-	Picture     string               `bson:"picture,omitempty" json:"picture,omitempty"`
-	CreatedBy   primitive.ObjectID   `bson:"created_by" json:"created_by"`
-	Members     []primitive.ObjectID `bson:"members" json:"members"`
-	Admins      []primitive.ObjectID `bson:"admins,omitempty" json:"admins,omitempty"`
-	MaxMembers  int                  `bson:"max_members,omitempty" json:"max_members,omitempty"`
-	IsActive    bool                 `bson:"is_active" json:"is_active"`
-	CreatedAt   time.Time            `bson:"created_at" json:"created_at"`
-	UpdatedAt   time.Time            `bson:"updated_at" json:"updated_at"`
-	DirectKey   string               `bson:"direct_key,omitempty" json:"direct_key,omitempty"`
+	ID          primitive.ObjectID   `json:"id"`
+	Name        string               `json:"name,omitempty" binding:"max=50"`
+	Description string               `json:"description,omitempty"`
+	Type        string               `json:"type" binding:"required,oneof=private public direct"`
+	Picture     string               `json:"picture,omitempty"`
+	OwnerID     primitive.ObjectID   `json:"owner_id"`
+	Members     []primitive.ObjectID `json:"members"`
+	Admins      []primitive.ObjectID `json:"admins,omitempty"`
+	MaxMembers  int                  `json:"max_members,omitempty"`
+	IsActive    bool                 `json:"is_active"`
+	CreatedAt   time.Time            `json:"created_at"`
+	UpdatedAt   time.Time            `json:"updated_at"`
+	DirectKey   string               `json:"direct_key,omitempty"`
 }
 
 type CreateRoomRequest struct {
@@ -45,7 +45,7 @@ type RoomResponse struct {
 	Description string                  `json:"description,omitempty"`
 	Type        string                  `json:"type"`
 	Picture     string                  `json:"picture,omitempty"`
-	CreatedBy   primitive.ObjectID      `json:"created_by"`
+	OwnerID     primitive.ObjectID      `json:"owner_id"`
 	MemberCount int                     `json:"member_count"`
 	MaxMembers  int                     `json:"max_members,omitempty"`
 	IsActive    bool                    `json:"is_active"`
@@ -63,8 +63,6 @@ type RoomDetailsResponse struct {
 	Picture     string             `json:"picture,omitempty"`
 	MemberCount int                `json:"member_count"`
 	MaxMembers  int                `json:"max_members,omitempty"`
-	Members     []RoomMember       `json:"members"`
-	Admins      []RoomMember       `json:"admins"`
 	IsActive    bool               `json:"is_active"`
 	IsAdmin     bool               `json:"is_admin"`
 	CreatedAt   time.Time          `json:"created_at"`
@@ -81,6 +79,7 @@ type RoomMember struct {
 	UserID   primitive.ObjectID `json:"user_id"`
 	Username string             `json:"username"`
 	Picture  string             `json:"picture,omitempty"`
+	IsAdmin  bool               `json:"is_admin"`
 	IsOnline bool               `json:"is_online"`
 	IsMe     bool               `json:"is_me"`
 }

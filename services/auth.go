@@ -10,11 +10,13 @@ import (
 
 type AuthService struct {
 	MongoService *MongoService
+	RedisService *RedisService
 }
 
-func NewAuthService(mongoService *MongoService) *AuthService {
+func NewAuthService(mongoService *MongoService, redisService *RedisService) *AuthService {
 	return &AuthService{
 		MongoService: mongoService,
+		RedisService: redisService,
 	}
 }
 
@@ -37,21 +39,31 @@ func (as *AuthService) GetUserByUsername(username string) (*models.User, error) 
 }
 
 func (as *AuthService) CreateUser(user *models.User) error {
-	_, err := as.MongoService.GetCollection("users").InsertOne(context.Background(), user)
-	return err
+	return as.RedisService.Publish("user", "user.register", user)
 }
 
-func (as *AuthService) UpdateUser(userID primitive.ObjectID, update map[string]any) (*models.User, error) {
-	_, err := as.MongoService.GetCollection("users").UpdateOne(context.Background(), bson.M{"_id": userID}, bson.M{"$set": update})
+func (as *AuthService) UpdateUser(userID primitive.ObjectID, data map[string]any) (*models.User, error) {
+	user, err := as.GetUserByID(userID)
 	if err != nil {
 		return nil, err
 	}
 
-	var updatedUser models.User
-	err = as.MongoService.GetCollection("users").FindOne(context.Background(), bson.M{"_id": userID}).Decode(&updatedUser)
+	data["id"] = userID
+
+	if val, ok := data["username"].(string); ok {
+		user.Username = val
+	}
+	if val, ok := data["picture"].(string); ok {
+		user.Picture = val
+	}
+	if val, ok := data["bio"].(string); ok {
+		user.Bio = val
+	}
+
+	err = as.RedisService.Publish("user", "user.update", data)
 	if err != nil {
 		return nil, err
 	}
 
-	return &updatedUser, nil
+	return user, nil
 }

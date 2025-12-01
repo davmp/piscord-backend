@@ -7,6 +7,7 @@ import (
 type Config struct {
 	Port      string
 	MongoURI  string
+	RedisURI  string
 	JWTSecret string
 }
 
@@ -14,6 +15,7 @@ func Load() *Config {
 	return &Config{
 		Port:      getEnv("PORT", ""),
 		MongoURI:  getEnv("MONGO_URI", ""),
+		RedisURI:  getEnv("REDIS_URI", ""),
 		JWTSecret: getEnv("JWT_SECRET", ""),
 	}
 }

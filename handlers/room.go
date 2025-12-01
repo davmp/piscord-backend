@@ -22,13 +22,15 @@ type RoomHandler struct {
 	AuthService  *services.AuthService
 	ChatService  *services.ChatService
 	MongoService *services.MongoService
+	RedisService *services.RedisService
 }
 
-func NewRoomHandler(authService *services.AuthService, chatService *services.ChatService, mongoService *services.MongoService) *RoomHandler {
+func NewRoomHandler(authService *services.AuthService, chatService *services.ChatService, mongoService *services.MongoService, redisService *services.RedisService) *RoomHandler {
 	return &RoomHandler{
 		AuthService:  authService,
 		ChatService:  chatService,
 		MongoService: mongoService,
+		RedisService: redisService,
 	}
 }
 
@@ -64,7 +66,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		Description: req.Description,
 		Type:        req.Type,
 		Picture:     req.Picture,
-		CreatedBy:   userObjectID,
+		OwnerID:     userObjectID,
 		Members:     []primitive.ObjectID{userObjectID},
 		Admins:      []primitive.ObjectID{},
 		IsActive:    true,
@@ -103,7 +105,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 				Description: existing.Description,
 				Picture:     existing.Picture,
 				Type:        existing.Type,
-				CreatedBy:   existing.CreatedBy,
+				OwnerID:     existing.OwnerID,
 				MemberCount: len(existing.Members),
 				MaxMembers:  existing.MaxMembers,
 				IsActive:    existing.IsActive,
@@ -150,11 +152,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		room.Admins = []primitive.ObjectID{userObjectID}
 	}
 
-	_, err = roomsCollection.InsertOne(context.Background(), room)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to create room"})
-		return
-	}
+	h.RedisService.Publish("chat", "room.create", room)
 
 	roomResponse := models.RoomResponse{
 		ID:          room.ID,
@@ -162,7 +160,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		Type:        room.Type,
 		Picture:     room.Picture,
 		Description: room.Description,
-		CreatedBy:   room.CreatedBy,
+		OwnerID:     room.OwnerID,
 		MemberCount: len(room.Members),
 		MaxMembers:  room.MaxMembers,
 		IsActive:    room.IsActive,
@@ -241,39 +239,6 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 		UpdatedAt:   room.UpdatedAt,
 	}
 
-	members := []models.RoomMember{}
-	for _, memberID := range room.Members {
-		member, err := h.AuthService.GetUserByID(memberID)
-
-		if err == nil {
-			members = append(members, models.RoomMember{
-				UserID:   memberID,
-				Username: member.Username,
-				Picture:  member.Picture,
-				IsOnline: h.ChatService.GetUserStatus(member.ID.Hex()),
-				IsMe:     member.ID == userObjectID,
-			})
-		}
-	}
-
-	admins := []models.RoomMember{}
-	for _, memberID := range room.Admins {
-		member, err := h.AuthService.GetUserByID(memberID)
-
-		if err == nil {
-			admins = append(admins, models.RoomMember{
-				UserID:   memberID,
-				Username: member.Username,
-				Picture:  member.Picture,
-				IsOnline: h.ChatService.GetUserStatus(member.ID.Hex()),
-				IsMe:     member.ID == userObjectID,
-			})
-		}
-	}
-
-	roomResponse.Members = members
-	roomResponse.Admins = admins
-
 	if room.Type == "direct" {
 		var otherMemberID primitive.ObjectID
 		for _, memberID := range room.Members {
@@ -289,13 +254,77 @@ func (h *RoomHandler) GetRoom(c *gin.Context) {
 			return
 		}
 
-		roomResponse.Admins = []models.RoomMember{}
 		roomResponse.IsAdmin = false
 		roomResponse.DisplayName = user.Username
 		roomResponse.Picture = user.Picture
 	}
 
 	c.JSON(http.StatusOK, roomResponse)
+}
+
+func (h *RoomHandler) GetRoomMembers(c *gin.Context) {
+	roomID := c.Param("id")
+	roomObjectID, err := primitive.ObjectIDFromHex(roomID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room ID"})
+	}
+
+	userID, _ := c.Get("user_id")
+	userObjectID, err := primitive.ObjectIDFromHex(userID.(string))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid user ID"})
+		return
+	}
+
+	roomsCollection := h.MongoService.GetCollection("rooms")
+	var room models.Room
+	err = roomsCollection.FindOne(context.Background(), bson.M{
+		"_id":       roomObjectID,
+		"is_active": true,
+	}).Decode(&room)
+	if err != nil {
+		if err == mongo.ErrNoDocuments {
+			c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
+		} else {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch room"})
+		}
+		return
+	}
+
+	memberIDs := room.Members
+	adminIDs := room.Admins
+
+	var members []models.RoomMember
+	userCollection := h.MongoService.GetCollection("users")
+
+	cursor, err := userCollection.Find(context.Background(), bson.M{
+		"_id": bson.M{"$in": memberIDs},
+	})
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch users"})
+		return
+	}
+	defer cursor.Close(context.Background())
+
+	for cursor.Next(context.Background()) {
+		var user models.User
+		if err := cursor.Decode(&user); err != nil {
+			continue
+		}
+		members = append(members, models.RoomMember{
+			UserID:   user.ID,
+			Username: user.Username,
+			Picture:  user.Picture,
+			IsAdmin:  slices.Contains(adminIDs, user.ID),
+			IsOnline: h.ChatService.GetUserStatus(user.ID.Hex()),
+			IsMe:     user.ID == userObjectID,
+		})
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"total":   len(room.Members),
+		"members": members,
+	})
 }
 
 func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
@@ -342,7 +371,7 @@ func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
 		Description: room.Description,
 		Type:        room.Type,
 		Picture:     room.Picture,
-		CreatedBy:   room.CreatedBy,
+		OwnerID:     room.OwnerID,
 		MemberCount: 2,
 		MaxMembers:  2,
 		IsActive:    room.IsActive,
@@ -394,7 +423,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 				Description: room.Description,
 				Type:        room.Type,
 				Picture:     room.Picture,
-				CreatedBy:   room.CreatedBy,
+				OwnerID:     room.OwnerID,
 				MemberCount: len(room.Members),
 				MaxMembers:  room.MaxMembers,
 				IsActive:    room.IsActive,
@@ -493,11 +522,7 @@ func (h *RoomHandler) UpdateRoom(c *gin.Context) {
 	room.UpdatedAt = time.Now()
 	updateFields["updated_at"] = room.UpdatedAt
 
-	_, err = roomsCollection.UpdateByID(context.Background(), room.ID, bson.M{"$set": updateFields})
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update room"})
-		return
-	}
+	h.RedisService.Publish("chat", "room.update", updateFields)
 
 	roomResponse := models.RoomDetailsResponse{
 		ID:          room.ID,
@@ -512,39 +537,6 @@ func (h *RoomHandler) UpdateRoom(c *gin.Context) {
 		CreatedAt:   room.CreatedAt,
 		UpdatedAt:   room.UpdatedAt,
 	}
-
-	members := []models.RoomMember{}
-	for _, memberID := range room.Members {
-		member, err := h.AuthService.GetUserByID(memberID)
-
-		if err == nil {
-			members = append(members, models.RoomMember{
-				UserID:   memberID,
-				Username: member.Username,
-				Picture:  member.Picture,
-				IsOnline: h.ChatService.GetUserStatus(member.ID.Hex()),
-				IsMe:     member.ID == userObjectID,
-			})
-		}
-	}
-
-	admins := []models.RoomMember{}
-	for _, memberID := range room.Admins {
-		member, err := h.AuthService.GetUserByID(memberID)
-
-		if err == nil {
-			admins = append(admins, models.RoomMember{
-				UserID:   memberID,
-				Username: member.Username,
-				Picture:  member.Picture,
-				IsOnline: h.ChatService.GetUserStatus(member.ID.Hex()),
-				IsMe:     member.ID == userObjectID,
-			})
-		}
-	}
-
-	roomResponse.Members = members
-	roomResponse.Admins = admins
 
 	if room.Type == "direct" {
 		var otherMemberID primitive.ObjectID
@@ -561,7 +553,6 @@ func (h *RoomHandler) UpdateRoom(c *gin.Context) {
 			return
 		}
 
-		roomResponse.Admins = []models.RoomMember{}
 		roomResponse.IsAdmin = false
 		roomResponse.DisplayName = user.Username
 		roomResponse.Picture = user.Picture
@@ -611,7 +602,7 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 			Description: room.Description,
 			Type:        room.Type,
 			Picture:     room.Picture,
-			CreatedBy:   room.CreatedBy,
+			OwnerID:     room.OwnerID,
 			MemberCount: len(room.Members),
 			MaxMembers:  room.MaxMembers,
 			IsActive:    room.IsActive,
@@ -706,42 +697,10 @@ func (h *RoomHandler) JoinRoom(c *gin.Context) {
 		return
 	}
 
-	roomsCollection := h.MongoService.GetCollection("rooms")
-	var room models.Room
-	err = roomsCollection.FindOne(context.Background(), bson.M{
-		"_id":       roomObjectID,
-		"is_active": true,
-	}).Decode(&room)
-
-	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to fetch room"})
-		}
-		return
-	}
-
-	if slices.Contains(room.Members, userObjectID) {
-		c.JSON(http.StatusConflict, gin.H{"error": "Already a member of this room"})
-		return
-	}
-
-	if room.MaxMembers > 0 && len(room.Members) >= room.MaxMembers {
-		c.JSON(http.StatusForbidden, gin.H{"error": "Room is full"})
-		return
-	}
-
-	update := bson.M{
-		"$push": bson.M{"members": userObjectID},
-		"$set":  bson.M{"updated_at": time.Now()},
-	}
-
-	_, err = roomsCollection.UpdateOne(context.Background(), bson.M{"_id": roomObjectID}, update)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to join room"})
-		return
-	}
+	h.RedisService.Publish("chat", "room.join", bson.M{
+		"id":      roomObjectID,
+		"user_id": userObjectID,
+	})
 
 	c.JSON(http.StatusOK, gin.H{})
 }
@@ -761,20 +720,10 @@ func (h *RoomHandler) LeaveRoom(c *gin.Context) {
 		return
 	}
 
-	roomsCollection := h.MongoService.GetCollection("rooms")
-	update := bson.M{
-		"$pull": bson.M{
-			"members": userObjectID,
-			"admins":  userObjectID,
-		},
-		"$set": bson.M{"updated_at": time.Now()},
-	}
-
-	_, err = roomsCollection.UpdateOne(context.Background(), bson.M{"_id": roomObjectID}, update)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to leave room"})
-		return
-	}
+	h.RedisService.Publish("chat", "room.leave", bson.M{
+		"id":      roomObjectID,
+		"user_id": userObjectID,
+	})
 
 	c.JSON(http.StatusOK, gin.H{})
 }

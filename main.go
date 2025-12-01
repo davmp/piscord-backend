@@ -21,10 +21,11 @@ func main() {
 	cfg := config.Load()
 
 	mongoService := services.NewMongoService(cfg.MongoURI)
-	authService := services.NewAuthService(mongoService)
+	redisService := services.NewRedisService(cfg.RedisURI)
+	authService := services.NewAuthService(mongoService, redisService)
 	roomService := services.NewRoomService(authService, mongoService)
-	notificationService := services.NewNotificationService(authService, mongoService)
-	chatService := services.NewChatService(roomService, mongoService, notificationService, authService)
+	notificationService := services.NewNotificationService(authService, mongoService, redisService)
+	chatService := services.NewChatService(roomService, mongoService, notificationService, authService, redisService)
 
 	if err := mongoService.Connect(); err != nil {
 		log.Fatal("Error connecting to MongoDB: ", err)
@@ -47,7 +48,7 @@ func main() {
 
 	authHandler := handlers.NewAuthHandler(authService, chatService, roomService, cfg)
 	chatHandler := handlers.NewChatHandler(chatService, cfg)
-	roomHandler := handlers.NewRoomHandler(authService, chatService, mongoService)
+	roomHandler := handlers.NewRoomHandler(authService, chatService, mongoService, redisService)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 
 	profile := router.Group("/api/profile")
@@ -77,6 +78,7 @@ func main() {
 		rooms.GET("/direct/:id", roomHandler.GetDirectRoom)
 		rooms.POST("/:id/join", roomHandler.JoinRoom)
 		rooms.POST("/:id/leave", roomHandler.LeaveRoom)
+		rooms.GET("/:id/members", roomHandler.GetRoomMembers)
 		rooms.GET("/:id/messages", roomHandler.GetMessages)
 	}
 

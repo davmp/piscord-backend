@@ -7,13 +7,13 @@ import (
 )
 
 type User struct {
-	ID        primitive.ObjectID `bson:"_id,omitempty" json:"id"`
-	Username  string             `bson:"username" json:"username" binding:"required,min=3,max=30"`
-	Password  string             `bson:"password" json:"password,omitempty" binding:"required,min=4"`
-	Picture   string             `bson:"picture,omitempty" json:"picture,omitempty"`
-	Bio       string             `bson:"bio,omitempty" json:"bio,omitempty"`
-	CreatedAt time.Time          `bson:"created_at" json:"created_at"`
-	UpdatedAt time.Time          `bson:"updated_at" json:"updated_at"`
+	ID        primitive.ObjectID `json:"id"`
+	Username  string             `json:"username" binding:"required,min=3,max=30"`
+	Password  string             `json:"password,omitempty" binding:"required,min=4"`
+	Picture   string             `json:"picture,omitempty"`
+	Bio       string             `json:"bio,omitempty"`
+	CreatedAt time.Time          `json:"created_at"`
+	UpdatedAt time.Time          `json:"updated_at"`
 }
 
 type UserResponse struct {
