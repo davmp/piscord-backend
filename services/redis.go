@@ -34,8 +34,8 @@ func (rs *RedisService) Publish(stream string, eventType string, payload any) er
 	err = rs.Client.XAdd(context.Background(), &redis.XAddArgs{
 		Stream: stream,
 		Values: map[string]any{
-			"type": eventType,
-			"data": data,
+			"type":    eventType,
+			"payload": data,
 		},
 	}).Err()
 
