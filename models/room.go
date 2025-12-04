@@ -51,40 +51,32 @@ type UpdateRoomRequest struct {
 	UpdatedAt     time.Time `json:"updatedAt" bson:"updatedAt"`
 }
 
-type RoomResponse struct {
-	ID          bson.ObjectID           `json:"id"`
-	DisplayName string                  `json:"displayName"`
-	Description string                  `json:"description,omitempty"`
-	Type        string                  `json:"type"`
-	Picture     string                  `json:"picture,omitempty"`
-	OwnerID     bson.ObjectID           `json:"ownerId"`
-	MemberCount int                     `json:"memberCount"`
-	MaxMembers  int                     `json:"maxMembers,omitempty"`
-	IsActive    bool                    `json:"isActive"`
-	IsAdmin     bool                    `json:"isAdmin"`
-	CreatedAt   time.Time               `json:"createdAt"`
-	UpdatedAt   time.Time               `json:"updatedAt"`
-	LastMessage *MessagePreviewResponse `json:"lastMessage"`
+type RoomPreview struct {
+	ID          bson.ObjectID   `json:"id"`
+	DisplayName string          `json:"displayName"`
+	Description string          `json:"description,omitempty"`
+	Type        string          `json:"type"`
+	Picture     string          `json:"picture,omitempty"`
+	LastMessage *MessagePreview `json:"lastMessage"`
 }
 
-type RoomDetailsResponse struct {
+type RoomDetails struct {
 	ID          bson.ObjectID `json:"id"`
 	DisplayName string        `json:"displayName"`
 	Description string        `json:"description,omitempty"`
 	Type        string        `json:"type"`
 	Picture     string        `json:"picture,omitempty"`
-	MemberCount int           `json:"memberCount"`
 	MaxMembers  int           `json:"maxMembers,omitempty"`
 	IsActive    bool          `json:"isActive"`
 	IsAdmin     bool          `json:"isAdmin"`
+	Members     []RoomMember  `json:"members"`
 	CreatedAt   time.Time     `json:"createdAt"`
 	UpdatedAt   time.Time     `json:"updatedAt"`
 }
 
-type PublicRoomResponse struct {
-	RoomResponse
-	DisplayName string `json:"displayName"`
-	IsMember    bool   `json:"isMember"`
+type PublicRoom struct {
+	RoomPreview
+	IsMember bool `json:"isMember"`
 }
 
 type RoomMember struct {

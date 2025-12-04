@@ -7,7 +7,7 @@ import (
 )
 
 type User struct {
-	ID        bson.ObjectID `json:"id" bson:"_id,omitempty"`
+	ID        bson.ObjectID `json:"id" bson:"_id"`
 	Username  string        `json:"username" bson:"username" binding:"required,min=3,max=30"`
 	Password  string        `json:"password" bson:"password" binding:"required,min=4"`
 	Picture   string        `json:"picture" bson:"picture"`
@@ -16,16 +16,16 @@ type User struct {
 	UpdatedAt time.Time     `json:"updatedAt" bson:"updatedAt"`
 }
 
-type UserResponse struct {
-	ID        bson.ObjectID `json:"id"`
-	Username  string        `json:"username"`
-	Picture   string        `json:"picture,omitempty"`
-	Bio       string        `json:"bio,omitempty"`
-	CreatedAt time.Time     `json:"createdAt"`
+type UserSummary struct {
+	ID       bson.ObjectID `json:"id" bson:"_id"`
+	Username string        `json:"username" bson:"username"`
+	Picture  string        `json:"picture,omitempty" bson:"picture,omitempty"`
 }
 
 type ProfileResponse struct {
-	UserResponse
+	UserSummary
+	Bio          string         `json:"bio,omitempty"`
+	CreatedAt    time.Time      `json:"createdAt"`
 	IsOnline     bool           `json:"isOnline"`
 	DirectChatID *bson.ObjectID `json:"directChatId,omitempty"`
 }
@@ -37,18 +37,13 @@ type UpdateProfileRequest struct {
 	Bio      string `json:"bio,omitempty"`
 }
 
-type UserRegisterRequest struct {
-	Username string `json:"username" binding:"required,min=3,max=30"`
-	Password string `json:"password" binding:"required,min=6"`
-	Picture  string `json:"picture,omitempty"`
-}
-
-type AuthRequest struct {
+type UserLoginRequest struct {
 	Username string `json:"username" binding:"required"`
 	Password string `json:"password" binding:"required"`
 }
 
-type AuthResponse struct {
-	Token string        `json:"token"`
-	User  *UserResponse `json:"user"`
+type UserRegisterRequest struct {
+	Username string `json:"username" binding:"required,min=3,max=30"`
+	Password string `json:"password" binding:"required,min=6"`
+	Picture  string `json:"picture,omitempty"`
 }

@@ -163,7 +163,7 @@ func (cs *ChatService) JoinRoom(client *Client, roomID string) error {
 	cs.Hub.mutex.Unlock()
 
 	message := models.WSResponse{
-		Type:    "user_joined",
+		Type:    "user.joined",
 		Success: true,
 		Data: map[string]any{
 			"roomId": roomID,
@@ -222,7 +222,7 @@ func (cs *ChatService) IsUserInRoom(userID, roomID string) bool {
 	return inRoom
 }
 
-func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, messageType string, replyTo *bson.ObjectID) error {
+func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, messageType string, replyTo *models.MessagePreview) error {
 	roomObjectID, err := bson.ObjectIDFromHex(roomID)
 	if err != nil {
 		return err
@@ -242,93 +242,44 @@ func (cs *ChatService) SendMessage(client *Client, roomID, content, fileUrl, mes
 		return errors.New("user is not a member of this room")
 	}
 
-	message := models.Message{
-		ID:        bson.NewObjectID(),
-		RoomID:    roomObjectID,
-		UserID:    userObjectID,
-		Content:   content,
-		Type:      messageType,
-		FileURL:   fileUrl,
-		ReplyTo:   nil,
-		IsEdited:  false,
-		IsDeleted: false,
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+	message := models.MessageSend{
+		RoomID: roomObjectID,
+		Author: models.UserSummary{
+			ID:       userObjectID,
+			Username: client.Username,
+			Picture:  client.Picture,
+		},
+		Content: content,
+		FileURL: fileUrl,
+		ReplyTo: replyTo,
+		SentAt:  time.Now(),
 	}
 
-	if replyTo != nil {
-		message.ReplyTo = replyTo
-	}
+	cs.RedisService.Publish("chat", "message.send", message)
 
-	cs.RedisService.Publish("chat", "message.create", message)
-
-	messageResponse := models.MessageResponse{
-		ID:        message.ID,
-		RoomID:    message.RoomID,
-		UserID:    message.UserID,
-		Username:  client.Username,
-		Picture:   client.Picture,
-		Content:   message.Content,
-		Type:      message.Type,
-		FileURL:   message.FileURL,
-		ReplyTo:   nil,
-		IsEdited:  message.IsEdited,
-		CreatedAt: message.CreatedAt,
-		UpdatedAt: message.UpdatedAt,
-	}
-
-	if message.ReplyTo != nil {
-		var replyToMessage models.Message
-
-		if err := cs.MongoService.GetCollection("messages").FindOne(context.Background(), bson.M{"_id": message.ReplyTo}).Decode(&replyToMessage); err == nil {
-			messageResponse.ReplyTo = &models.MessagePreviewResponse{
-				ID:        replyToMessage.ID,
-				Username:  "Desconhecido",
-				Content:   replyToMessage.Content,
-				CreatedAt: replyToMessage.CreatedAt,
-			}
-
-			if user, err := cs.AuthService.GetUserByID(replyToMessage.UserID); err == nil {
-				messageResponse.ReplyTo.Username = user.Username
-				messageResponse.ReplyTo.Picture = user.Picture
-			}
-		}
-	}
-
-	cs.notifyMessage(messageResponse)
-	cs.notifyMessageGroupUsers(room, messageResponse)
+	cs.notifyMessage(message)
+	cs.notifyMessageGroupUsers(room, message)
 
 	cs.broadcastToRoomExcept(
 		roomID,
 		models.WSResponse{
-			Type:    "new_message",
+			Type:    "new.message",
 			Success: true,
-			Data: map[string]any{
-				"message":      messageResponse,
-				"isOwnMessage": false,
-			},
+			Data:    message,
 		},
 		client,
 	)
 
 	cs.sendToClient(client, models.WSResponse{
-		Type:    "new_message",
+		Type:    "new.message",
 		Success: true,
-		Data: map[string]any{
-			"message":      messageResponse,
-			"isOwnMessage": true,
-		},
+		Data:    message,
 	})
 
 	return nil
 }
 
-func (cs *ChatService) EditMessage(client *Client, roomID, messageID, content string) error {
-	roomObjectID, err := bson.ObjectIDFromHex(roomID)
-	if err != nil {
-		return err
-	}
-
+func (cs *ChatService) EditMessage(client *Client, messageID, content string) error {
 	userObjectID, err := bson.ObjectIDFromHex(client.UserID)
 	if err != nil {
 		return err
@@ -339,22 +290,12 @@ func (cs *ChatService) EditMessage(client *Client, roomID, messageID, content st
 		return err
 	}
 
-	_, err = cs.MongoService.GetCollection("messages").UpdateOne(
-		context.Background(),
-		bson.M{
-			"_id":    messageObjectID,
-			"userId": userObjectID,
-			"roomId": roomObjectID,
-		},
-		bson.M{
-			"$set": bson.M{
-				"content":   content,
-				"is_edited": true,
-			},
-		},
-	)
-
-	return err
+	return cs.RedisService.Publish("chat", "message.update", map[string]any{
+		"id":        messageObjectID,
+		"userId":    userObjectID,
+		"content":   content,
+		"updatedAt": time.Now(),
+	})
 }
 
 func (cs *ChatService) UpdateClient(userID, username, picture string) error {
@@ -479,7 +420,7 @@ func (cs *ChatService) leaveRoomInternal(client *Client, roomID string) {
 	cs.notifyUserLeft(room, client)
 
 	notification := models.WSResponse{
-		Type:    "user_left",
+		Type:    "user.left",
 		Success: true,
 		Data: map[string]any{
 			"roomId": roomID,
@@ -584,7 +525,7 @@ func (cs *ChatService) notifyUserJoined(room *models.Room, client *Client) error
 				Title:     fmt.Sprintf("%s entrou na sala", client.Username),
 				Body:      fmt.Sprintf("Um novo usuário %s entrou em %s", client.Username, room.Name),
 				Picture:   client.Picture,
-				Type:      "user_joined",
+				Type:      "user.joined",
 				IsRead:    false,
 				CreatedAt: time.Now(),
 			}
@@ -614,7 +555,7 @@ func (cs *ChatService) notifyUserJoined(room *models.Room, client *Client) error
 	return nil
 }
 
-func (cs *ChatService) notifyMessageGroupUsers(room *models.Room, message models.MessageResponse) error {
+func (cs *ChatService) notifyMessageGroupUsers(room *models.Room, message models.MessageSend) error {
 	if len(room.Members) == 0 {
 		return nil
 	}
@@ -635,19 +576,19 @@ func (cs *ChatService) notifyMessageGroupUsers(room *models.Room, message models
 	if message.ReplyTo != nil {
 		var repliedMsg models.Message
 		err := cs.MongoService.GetCollection("messages").FindOne(context.Background(), bson.M{"_id": message.ReplyTo}).Decode(&repliedMsg)
-		if err == nil && repliedMsg.UserID != message.UserID {
-			usersToNotify[repliedMsg.UserID] = struct{}{}
+		if err == nil && repliedMsg.Author.ID != message.Author.ID {
+			usersToNotify[repliedMsg.Author.ID] = struct{}{}
 		}
 	}
 
 	var title string
 	var body string
 	if room.Type == "direct" {
-		title = fmt.Sprintf("Nova mensagem de %s", message.Username)
+		title = fmt.Sprintf("Nova mensagem de %s", message.Author.Username)
 		body = strings.ReplaceAll(message.Content, "\n", " ")
 	} else {
 		title = fmt.Sprintf("Nova mensagem em %s", room.Name)
-		body = fmt.Sprintf("%s: %s", message.Username, strings.ReplaceAll(message.Content, "\n", " "))
+		body = fmt.Sprintf("%s: %s", message.Author.Username, strings.ReplaceAll(message.Content, "\n", " "))
 	}
 
 	for userID := range usersToNotify {
@@ -658,7 +599,7 @@ func (cs *ChatService) notifyMessageGroupUsers(room *models.Room, message models
 			Body:      body,
 			Type:      models.NotificationTypeNewMessage,
 			Link:      fmt.Sprintf("/chat/%s", room.ID.Hex()),
-			Picture:   message.Picture,
+			Picture:   message.Author.Picture,
 			IsRead:    false,
 			CreatedAt: time.Now(),
 		}
@@ -683,7 +624,7 @@ func (cs *ChatService) notifyMessageGroupUsers(room *models.Room, message models
 	return nil
 }
 
-func (cs *ChatService) notifyMessage(message models.MessageResponse) error {
+func (cs *ChatService) notifyMessage(message models.MessageSend) error {
 	room, err := cs.RoomService.GetRoomByID(message.RoomID)
 	if err != nil {
 		return err
@@ -702,7 +643,7 @@ func (cs *ChatService) notifyMessage(message models.MessageResponse) error {
 		}
 
 		cs.sendToClient(client, models.WSResponse{
-			Type:    "message_notification",
+			Type:    "message.notification",
 			Success: true,
 			Data:    message,
 		})

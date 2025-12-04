@@ -25,6 +25,8 @@ func (as *AuthService) GetUserByID(userID bson.ObjectID) (*models.User, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	as.RedisService.CacheUserProfile(userID.Hex(), user)
 	return &user, nil
 }
 
@@ -34,11 +36,19 @@ func (as *AuthService) GetUserByUsername(username string) (*models.User, error) 
 	if err != nil {
 		return nil, err
 	}
+
+	as.RedisService.CacheUserProfile(user.ID.Hex(), user)
 	return &user, nil
 }
 
 func (as *AuthService) CreateUser(user *models.User) error {
-	return as.RedisService.Publish("user", "user.register", user)
+	err := as.RedisService.Publish("user", "user.register", user)
+	if err != nil {
+		return err
+	}
+
+	as.RedisService.CacheUserProfile(user.ID.Hex(), *user)
+	return nil
 }
 
 func (as *AuthService) UpdateUser(userID bson.ObjectID, data map[string]any) (*models.User, error) {
@@ -64,5 +74,6 @@ func (as *AuthService) UpdateUser(userID bson.ObjectID, data map[string]any) (*m
 		return nil, err
 	}
 
+	as.RedisService.CacheUserProfile(userID.Hex(), *user)
 	return user, nil
 }

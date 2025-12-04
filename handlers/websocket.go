@@ -155,26 +155,20 @@ func (h *ChatHandler) handleMessage(client *services.Client, message []byte) {
 		return
 	}
 
-	action, ok := payload["action"].(string)
-	if !ok {
-		h.sendError(client, "Missing action")
-		return
-	}
-
-	switch action {
-	case "enter_room":
+	switch wsMsg.Type {
+	case "room.enter":
 		h.handleEnterRoom(client, payload)
-	case "exit_room":
+	case "room.exit":
 		h.handleExitRoom(client, payload)
-	case "join_room":
+	case "room.join":
 		h.handleJoinRoom(client, payload)
-	case "leave_room":
+	case "room.leave":
 		h.handleLeaveRoom(client, payload)
-	case "send_message":
+	case "message.send":
 		h.handleSendMessage(client, payload)
-	case "edit_message":
+	case "message.edit":
 		h.handleEditMessage(client, payload)
-	case "typing":
+	case "message.typing":
 		h.handleTyping(client, payload)
 	default:
 		h.sendError(client, "Unknown action")
@@ -190,12 +184,12 @@ func (h *ChatHandler) handleEnterRoom(client *services.Client, payload map[strin
 
 	err := h.ChatService.EnterRoom(client, roomID)
 	if err != nil {
-		h.sendError(client, "Failed to enter room: "+err.Error())
+		h.sendError(client, "Failed to enter room. "+err.Error())
 		return
 	}
 
 	response := models.WSResponse{
-		Type:    "room_entered",
+		Type:    "room.entered",
 		Success: true,
 		Message: "Entered room successfully",
 		Data: map[string]any{
@@ -224,12 +218,12 @@ func (h *ChatHandler) handleJoinRoom(client *services.Client, payload map[string
 
 	err := h.ChatService.JoinRoom(client, roomID)
 	if err != nil {
-		h.sendError(client, "Failed to join room: "+err.Error())
+		h.sendError(client, "Failed to join room. "+err.Error())
 		return
 	}
 
 	response := models.WSResponse{
-		Type:    "room_joined",
+		Type:    "room.joined",
 		Success: true,
 		Message: "Successfully joined room",
 		Data: map[string]any{
@@ -249,7 +243,7 @@ func (h *ChatHandler) handleLeaveRoom(client *services.Client, payload map[strin
 	h.ChatService.LeaveRoom(client, roomID)
 
 	response := models.WSResponse{
-		Type:    "room_left",
+		Type:    "room.left",
 		Success: true,
 		Message: "Successfully left room",
 		Data: map[string]any{
@@ -288,16 +282,71 @@ func (h *ChatHandler) handleSendMessage(client *services.Client, payload map[str
 		fileUrl = fileUrlStr
 	}
 
-	var replyTo *bson.ObjectID = nil
-	if replyToStr, exists := payload["reply_to"].(string); exists {
-		replyToObjectID, err := bson.ObjectIDFromHex(replyToStr)
-
+	var replyTo *models.MessagePreview = nil
+	if replyToMap, exists := payload["reply_to"].(map[string]any); exists {
+		idStr, ok := replyToMap["id"].(string)
+		if !ok {
+			h.sendError(client, "Missing reply_to id")
+			return
+		}
+		replyToObjectID, err := bson.ObjectIDFromHex(idStr)
 		if err != nil {
-			h.sendError(client, "Invalid message to reply")
+			h.sendError(client, "Invalid reply_to id")
 			return
 		}
 
-		replyTo = &replyToObjectID
+		content, ok := replyToMap["content"].(string)
+		if !ok {
+			h.sendError(client, "Missing reply_to content")
+			return
+		}
+
+		authorMap, ok := replyToMap["author"].(map[string]any)
+		if !ok {
+			h.sendError(client, "Missing reply_to author")
+			return
+		}
+
+		authorIDStr, ok := authorMap["id"].(string)
+		if !ok {
+			h.sendError(client, "Missing reply_to author id")
+			return
+		}
+		authorID, err := bson.ObjectIDFromHex(authorIDStr)
+		if err != nil {
+			h.sendError(client, "Invalid reply_to author id")
+			return
+		}
+
+		authorUsername, ok := authorMap["username"].(string)
+		if !ok {
+			h.sendError(client, "Missing reply_to author username")
+			return
+		}
+
+		authorPicture, _ := authorMap["picture"].(string)
+
+		createdAtStr, ok := replyToMap["createdAt"].(string)
+		if !ok {
+			h.sendError(client, "Missing reply_to createdAt")
+			return
+		}
+		createdAt, err := time.Parse(time.RFC3339, createdAtStr)
+		if err != nil {
+			h.sendError(client, "Invalid reply_to createdAt format")
+			return
+		}
+
+		replyTo = &models.MessagePreview{
+			ID:      replyToObjectID,
+			Content: content,
+			Author: models.UserSummary{
+				ID:       authorID,
+				Username: authorUsername,
+				Picture:  authorPicture,
+			},
+			CreatedAt: createdAt,
+		}
 	}
 
 	err := h.ChatService.SendMessage(client, roomID, content, fileUrl, messageType, replyTo)
@@ -307,7 +356,7 @@ func (h *ChatHandler) handleSendMessage(client *services.Client, payload map[str
 	}
 
 	response := models.WSResponse{
-		Type:    "message_sent",
+		Type:    "message.sent",
 		Success: true,
 		Message: "Message sent successfully",
 	}
@@ -339,14 +388,14 @@ func (h *ChatHandler) handleEditMessage(client *services.Client, payload map[str
 		return
 	}
 
-	err := h.ChatService.EditMessage(client, roomID, messageId, content)
+	err := h.ChatService.EditMessage(client, messageId, content)
 	if err != nil {
 		h.sendError(client, "Failed to edit message: "+err.Error())
 		return
 	}
 
 	response := models.WSResponse{
-		Type:    "message_editted",
+		Type:    "message.editted",
 		Success: true,
 		Message: "Message editted successfully",
 	}
@@ -367,7 +416,7 @@ func (h *ChatHandler) handleTyping(client *services.Client, payload map[string]a
 	}
 
 	response := models.WSResponse{
-		Type:    "user_typing",
+		Type:    "user.typing",
 		Success: true,
 		Data: map[string]any{
 			"roomId": roomID,
@@ -384,13 +433,13 @@ func (h *ChatHandler) handleTyping(client *services.Client, payload map[string]a
 	go func() {
 		defer func() {
 			if r := recover(); r != nil {
-				log.Printf("Recovered in broadcast user_typing: %v\n%s", r, debug.Stack())
+				log.Printf("Recovered in broadcast user typing: %v\n%s", r, debug.Stack())
 			}
 		}()
 		select {
 		case h.ChatService.Hub.Broadcast <- data:
 		default:
-			log.Printf("Broadcast channel full, skipping user_typing message")
+			log.Printf("Broadcast channel full, skipping user typing message")
 		}
 	}()
 }

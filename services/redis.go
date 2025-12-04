@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"piscord-backend/models"
 
 	"github.com/redis/go-redis/v9"
 )
@@ -47,21 +48,21 @@ func (rs *RedisService) Publish(stream string, eventType string, payload any) er
 }
 
 func (rs *RedisService) AddUserToRoom(userID, roomID string) error {
-	key := fmt.Sprintf("room:%s:members", roomID)
+	key := fmt.Sprintf("room.%s:members", roomID)
 	return rs.Client.SAdd(context.Background(), key, userID).Err()
 }
 
 func (rs *RedisService) RemoveUserFromRoom(userID, roomID string) error {
-	key := fmt.Sprintf("room:%s:members", roomID)
+	key := fmt.Sprintf("room.%s:members", roomID)
 	return rs.Client.SRem(context.Background(), key, userID).Err()
 }
 
 func (rs *RedisService) IsUserInRoom(userID, roomID string) (bool, error) {
-	key := fmt.Sprintf("room:%s:members", roomID)
+	key := fmt.Sprintf("room.%s:members", roomID)
 	return rs.Client.SIsMember(context.Background(), key, userID).Result()
 }
 
-func (rs *RedisService) CacheUserProfile(userID string, user any) error {
+func (rs *RedisService) CacheUserProfile(userID string, user models.User) error {
 	data, err := json.Marshal(user)
 	if err != nil {
 		return fmt.Errorf("failed to marshal user: %w", err)

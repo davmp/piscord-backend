@@ -46,15 +46,15 @@ func main() {
 	}))
 	router.RedirectTrailingSlash = false
 
-	authHandler := handlers.NewAuthHandler(authService, chatService, roomService, cfg)
+	authHandler := handlers.NewAuthHandler(authService, chatService, roomService, redisService, cfg)
 	chatHandler := handlers.NewChatHandler(chatService, cfg)
-	roomHandler := handlers.NewRoomHandler(authService, chatService, mongoService, redisService)
+	roomHandler := handlers.NewRoomHandler(authService, chatService, roomService, mongoService, redisService)
 	notificationHandler := handlers.NewNotificationHandler(notificationService)
 
 	profile := router.Group("/api/profile")
 	profile.Use(middleware.AuthMiddleware())
 	{
-		profile.GET("", authHandler.Profile)
+		profile.GET("", authHandler.GetProfile)
 		profile.PUT("", authHandler.UpdateProfile)
 		profile.GET("/:id", authHandler.GetProfileByID)
 	}
@@ -78,7 +78,6 @@ func main() {
 		rooms.GET("/direct/:id", roomHandler.GetDirectRoom)
 		rooms.POST("/:id/join", roomHandler.JoinRoom)
 		rooms.POST("/:id/leave", roomHandler.LeaveRoom)
-		rooms.GET("/:id/members", roomHandler.GetRoomMembers)
 		rooms.GET("/:id/messages", roomHandler.GetMessages)
 	}
 

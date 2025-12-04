@@ -7,48 +7,32 @@ import (
 )
 
 type Message struct {
-	ID        bson.ObjectID  `json:"id" bson:"_id,omitempty"`
-	RoomID    bson.ObjectID  `json:"roomId" bson:"roomId"`
-	UserID    bson.ObjectID  `json:"userId" bson:"userId"`
-	Content   string         `json:"content" bson:"content"`
-	Type      string         `json:"type" bson:"type"` // "text", "image", "file", "system"
-	FileURL   string         `json:"fileUrl,omitempty" bson:"fileUrl,omitempty"`
-	ReplyTo   *bson.ObjectID `json:"replyTo,omitempty" bson:"replyTo,omitempty"`
-	IsEdited  bool           `json:"isEdited" bson:"isEdited"`
-	IsDeleted bool           `json:"isDeleted" bson:"isDeleted"`
-	CreatedAt time.Time      `json:"createdAt" bson:"createdAt"`
-	UpdatedAt time.Time      `json:"updatedAt" bson:"updatedAt"`
+	ID        bson.ObjectID   `json:"id" bson:"_id"`
+	RoomID    bson.ObjectID   `json:"roomId" bson:"roomId"`
+	Author    UserSummary     `json:"author" bson:"author"`
+	Content   string          `json:"content" bson:"content"`
+	FileURL   string          `json:"fileUrl,omitempty" bson:"fileUrl,omitempty"`
+	ReplyTo   *MessagePreview `json:"replyTo,omitempty" bson:"replyTo,omitempty"`
+	IsDeleted bool            `json:"isDeleted" bson:"isDeleted"`
+	EditedAt  *time.Time      `json:"editedAt" bson:"editedAt"`
+	CreatedAt time.Time       `json:"createdAt" bson:"createdAt"`
+	UpdatedAt time.Time       `json:"updatedAt" bson:"updatedAt"`
 }
 
-type SendMessageRequest struct {
-	RoomID  string `json:"roomId" binding:"required"`
-	Content string `json:"content" binding:"required"`
-	Type    string `json:"type,omitempty"`
-	ReplyTo string `json:"replyTo,omitempty"`
+type MessageSend struct {
+	RoomID  bson.ObjectID   `json:"roomId"`
+	Author  UserSummary     `json:"author"`
+	Content string          `json:"content"`
+	FileURL string          `json:"fileUrl,omitempty"`
+	ReplyTo *MessagePreview `json:"replyTo,omitempty"`
+	SentAt  time.Time       `json:"sentAt"`
 }
 
-type MessageResponse struct {
-	ID           bson.ObjectID           `json:"id"`
-	RoomID       bson.ObjectID           `json:"roomId"`
-	UserID       bson.ObjectID           `json:"userId"`
-	Username     string                  `json:"username"`
-	Picture      string                  `json:"picture,omitempty"`
-	Content      string                  `json:"content"`
-	Type         string                  `json:"type"`
-	FileURL      string                  `json:"fileUrl,omitempty"`
-	IsOwnMessage bool                    `json:"isOwnMessage"`
-	ReplyTo      *MessagePreviewResponse `json:"replyTo,omitempty"`
-	IsEdited     bool                    `json:"isEdited"`
-	CreatedAt    time.Time               `json:"createdAt"`
-	UpdatedAt    time.Time               `json:"updatedAt"`
-}
-
-type MessagePreviewResponse struct {
-	ID        bson.ObjectID `json:"id"`
-	Username  string        `json:"username"`
-	Content   string        `json:"content"`
-	Picture   string        `json:"picture,omitempty"`
-	CreatedAt time.Time     `json:"createdAt"`
+type MessagePreview struct {
+	ID        bson.ObjectID `json:"id" bson:"_id"`
+	Content   string        `json:"content" bson:"content"`
+	Author    UserSummary   `json:"author" bson:"author"`
+	CreatedAt time.Time     `json:"createdAt" bson:"createdAt"`
 }
 
 type WSMessage struct {

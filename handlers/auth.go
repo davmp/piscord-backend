@@ -18,23 +18,26 @@ import (
 )
 
 type AuthHandler struct {
-	AuthService *services.AuthService
-	ChatService *services.ChatService
-	RoomService *services.RoomService
-	Config      *config.Config
+	AuthService  *services.AuthService
+	ChatService  *services.ChatService
+	RoomService  *services.RoomService
+	RedisService *services.RedisService
+	Config       *config.Config
 }
 
-func NewAuthHandler(authService *services.AuthService, chatService *services.ChatService, roomService *services.RoomService, config *config.Config) *AuthHandler {
+func NewAuthHandler(authService *services.AuthService, chatService *services.ChatService, roomService *services.RoomService, redisService *services.RedisService, config *config.Config) *AuthHandler {
 	return &AuthHandler{
-		AuthService: authService,
-		ChatService: chatService,
-		RoomService: roomService,
-		Config:      config,
+		AuthService:  authService,
+		ChatService:  chatService,
+		RoomService:  roomService,
+		RedisService: redisService,
+		Config:       config,
 	}
 }
 
 func (h *AuthHandler) Login(c *gin.Context) {
-	var req models.AuthRequest
+	var req models.UserLoginRequest
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
@@ -62,22 +65,22 @@ func (h *AuthHandler) Login(c *gin.Context) {
 		return
 	}
 
-	userResponse := models.UserResponse{
-		ID:        user.ID,
-		Username:  user.Username,
-		Picture:   user.Picture,
-		Bio:       user.Bio,
-		CreatedAt: user.CreatedAt,
-	}
+	h.ChatService.UpdateClient(user.ID.Hex(), user.Username, user.Picture)
+	h.RedisService.CacheUserProfile(user.ID.Hex(), *user)
 
 	c.JSON(http.StatusOK, gin.H{
 		"token": token,
-		"user":  userResponse,
+		"user": models.UserSummary{
+			ID:       user.ID,
+			Username: user.Username,
+			Picture:  user.Picture,
+		},
 	})
 }
 
 func (h *AuthHandler) Register(c *gin.Context) {
 	var req models.UserRegisterRequest
+
 	if err := c.ShouldBindJSON(&req); err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "Username") {
@@ -126,21 +129,17 @@ func (h *AuthHandler) Register(c *gin.Context) {
 		return
 	}
 
-	userResponse := models.UserResponse{
-		ID:        user.ID,
-		Username:  user.Username,
-		Picture:   user.Picture,
-		Bio:       user.Bio,
-		CreatedAt: user.CreatedAt,
-	}
-
 	c.JSON(http.StatusCreated, gin.H{
 		"token": token,
-		"user":  userResponse,
+		"user": models.UserSummary{
+			ID:       user.ID,
+			Username: user.Username,
+			Picture:  user.Picture,
+		},
 	})
 }
 
-func (h *AuthHandler) Profile(c *gin.Context) {
+func (h *AuthHandler) GetProfile(c *gin.Context) {
 	userID, exists := c.Get("userId")
 	if !exists {
 		c.JSON(http.StatusUnauthorized, gin.H{"error": "Unauthorized"})
@@ -153,25 +152,34 @@ func (h *AuthHandler) Profile(c *gin.Context) {
 		return
 	}
 
-	user, err := h.AuthService.GetUserByID(userObjectID)
+	var user *models.User
+	err = h.RedisService.GetCachedUser(userObjectID.Hex(), &user)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		user, err = h.AuthService.GetUserByID(userObjectID)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			}
+			return
 		}
-		return
+		h.RedisService.CacheUserProfile(userObjectID.Hex(), *user)
 	}
 
-	userResponse := models.UserResponse{
-		ID:        user.ID,
-		Username:  user.Username,
-		Picture:   user.Picture,
-		Bio:       user.Bio,
-		CreatedAt: user.CreatedAt,
+	profile := models.ProfileResponse{
+		UserSummary: models.UserSummary{
+			ID:       user.ID,
+			Username: user.Username,
+			Picture:  user.Picture,
+		},
+		Bio:          user.Bio,
+		CreatedAt:    user.CreatedAt,
+		IsOnline:     true,
+		DirectChatID: nil,
 	}
 
-	c.JSON(http.StatusOK, userResponse)
+	c.JSON(http.StatusOK, profile)
 }
 
 func (h *AuthHandler) GetProfileByID(c *gin.Context) {
@@ -189,24 +197,29 @@ func (h *AuthHandler) GetProfileByID(c *gin.Context) {
 		return
 	}
 
-	user, err := h.AuthService.GetUserByID(profileObjectID)
+	var user *models.User
+	err = h.RedisService.GetCachedUser(profileObjectID.Hex(), &user)
 	if err != nil {
-		if err == mongo.ErrNoDocuments {
-			c.JSON(http.StatusUnauthorized, gin.H{"error": "User not found"})
-		} else {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+		user, err = h.AuthService.GetUserByID(profileObjectID)
+		if err != nil {
+			if err == mongo.ErrNoDocuments {
+				c.JSON(http.StatusNotFound, gin.H{"error": "User not found"})
+			} else {
+				c.JSON(http.StatusInternalServerError, gin.H{"error": "Database error"})
+			}
+			return
 		}
-		return
+		h.RedisService.CacheUserProfile(profileObjectID.Hex(), *user)
 	}
 
 	profileResponse := models.ProfileResponse{
-		UserResponse: models.UserResponse{
-			ID:        user.ID,
-			Username:  user.Username,
-			Picture:   user.Picture,
-			Bio:       user.Bio,
-			CreatedAt: user.CreatedAt,
+		UserSummary: models.UserSummary{
+			ID:       user.ID,
+			Username: user.Username,
+			Picture:  user.Picture,
 		},
+		Bio:          user.Bio,
+		CreatedAt:    user.CreatedAt,
 		IsOnline:     h.ChatService.GetUserStatus(user.ID.Hex()),
 		DirectChatID: nil,
 	}
@@ -277,11 +290,13 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		update["password"] = hashedPassword
 	}
 
-	user, err := h.AuthService.UpdateUser(userObjectID, update)
+	updatedUser, err := h.AuthService.UpdateUser(userObjectID, update)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to update user record"})
 		return
 	}
+
+	h.RedisService.CacheUserProfile(userObjectID.Hex(), *updatedUser)
 
 	err = h.ChatService.UpdateClient(userObjectID.Hex(), req.Username, req.Picture)
 	if err != nil {
@@ -289,13 +304,11 @@ func (h *AuthHandler) UpdateProfile(c *gin.Context) {
 		return
 	}
 
-	userResponse := models.UserResponse{
-		ID:        user.ID,
-		Username:  user.Username,
-		Picture:   user.Picture,
-		Bio:       user.Bio,
-		CreatedAt: user.CreatedAt,
+	user := models.UserSummary{
+		ID:       updatedUser.ID,
+		Username: updatedUser.Username,
+		Picture:  updatedUser.Picture,
 	}
 
-	c.JSON(http.StatusOK, userResponse)
+	c.JSON(http.StatusOK, user)
 }
