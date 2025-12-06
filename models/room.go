@@ -57,6 +57,7 @@ type RoomPreview struct {
 	Description string          `json:"description,omitempty"`
 	Type        string          `json:"type"`
 	Picture     string          `json:"picture,omitempty"`
+	IsAdmin     bool            `json:"isAdmin"`
 	LastMessage *MessagePreview `json:"lastMessage"`
 }
 
@@ -76,7 +77,8 @@ type RoomDetails struct {
 
 type PublicRoom struct {
 	RoomPreview
-	IsMember bool `json:"isMember"`
+	MembersCount int  `json:"membersCount"`
+	IsMember     bool `json:"isMember"`
 }
 
 type RoomMember struct {

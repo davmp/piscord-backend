@@ -168,6 +168,8 @@ func (h *ChatHandler) handleMessage(client *services.Client, message []byte) {
 		h.handleSendMessage(client, payload)
 	case "message.edit":
 		h.handleEditMessage(client, payload)
+	case "message.delete":
+		h.handleDeleteMessage(client, payload)
 	case "message.typing":
 		h.handleTyping(client, payload)
 	default:
@@ -278,12 +280,12 @@ func (h *ChatHandler) handleSendMessage(client *services.Client, payload map[str
 	}
 
 	fileUrl := ""
-	if fileUrlStr, exists := payload["file_url"].(string); exists {
+	if fileUrlStr, exists := payload["fileUrl"].(string); exists {
 		fileUrl = fileUrlStr
 	}
 
 	var replyTo *models.MessagePreview = nil
-	if replyToMap, exists := payload["reply_to"].(map[string]any); exists {
+	if replyToMap, exists := payload["replyTo"].(map[string]any); exists {
 		idStr, ok := replyToMap["id"].(string)
 		if !ok {
 			h.sendError(client, "Missing reply_to id")
@@ -398,6 +400,39 @@ func (h *ChatHandler) handleEditMessage(client *services.Client, payload map[str
 		Type:    "message.editted",
 		Success: true,
 		Message: "Message editted successfully",
+	}
+	h.sendToClient(client, response)
+}
+
+func (h *ChatHandler) handleDeleteMessage(client *services.Client, payload map[string]any) {
+	roomID, ok := payload["roomId"].(string)
+	if !ok {
+		h.sendError(client, "Missing roomId")
+		return
+	}
+
+	currentRoom := h.ChatService.GetUserCurrentRoom(client)
+	if currentRoom != roomID {
+		h.sendError(client, "You are not currently in this room")
+		return
+	}
+
+	messageId, ok := payload["messageId"].(string)
+	if !ok {
+		h.sendError(client, "Missing message to delete")
+		return
+	}
+
+	err := h.ChatService.DeleteMessage(client, messageId)
+	if err != nil {
+		h.sendError(client, "Failed to delete message: "+err.Error())
+		return
+	}
+
+	response := models.WSResponse{
+		Type:    "message.deleted",
+		Success: true,
+		Message: "Message deleted successfully",
 	}
 	h.sendToClient(client, response)
 }

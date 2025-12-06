@@ -28,6 +28,13 @@ type MessageSend struct {
 	SentAt  time.Time       `json:"sentAt"`
 }
 
+type MessageUpdate struct {
+	ID        bson.ObjectID `json:"id"`
+	UserID    bson.ObjectID `json:"userId"`
+	Content   string        `json:"content"`
+	UpdatedAt time.Time     `json:"updatedAt"`
+}
+
 type MessagePreview struct {
 	ID        bson.ObjectID `json:"id" bson:"_id"`
 	Content   string        `json:"content" bson:"content"`

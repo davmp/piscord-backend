@@ -97,7 +97,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 
 		var existing models.Room
 		err = roomsCollection.FindOne(context.Background(), bson.M{
-			"type":      "direct",
+			"type":      "DIRECT",
 			"directKey": room.DirectKey,
 			"isActive":  true,
 		}).Decode(&existing)
@@ -109,6 +109,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 				Description: existing.Description,
 				Type:        existing.Type,
 				Picture:     existing.Picture,
+				IsAdmin:     slices.Contains(existing.Admins, userObjectID),
 				LastMessage: nil,
 			}
 
@@ -159,6 +160,7 @@ func (h *RoomHandler) CreateRoom(c *gin.Context) {
 		Description: room.Description,
 		Type:        room.Type,
 		Picture:     room.Picture,
+		IsAdmin:     slices.Contains(room.Admins, userObjectID),
 		LastMessage: nil,
 	}
 
@@ -299,7 +301,7 @@ func (h *RoomHandler) GetDirectRoom(c *gin.Context) {
 	err = roomsCollection.FindOne(context.Background(), bson.M{
 		"isActive":  true,
 		"directKey": directKey,
-		"type":      "direct",
+		"type":      "DIRECT",
 	}).Decode(&room)
 
 	if err != nil {
@@ -376,7 +378,7 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 
 	roomsCollection := h.MongoService.GetCollection("rooms")
 	filter := bson.M{
-		"type":     "public",
+		"type":     "PUBLIC",
 		"isActive": true,
 	}
 
@@ -407,9 +409,11 @@ func (h *RoomHandler) GetRooms(c *gin.Context) {
 				Description: room.Description,
 				Type:        room.Type,
 				Picture:     room.Picture,
+				IsAdmin:     slices.Contains(room.Admins, userObjectID),
 				LastMessage: nil,
 			},
-			IsMember: !userObjectID.IsZero() && slices.Contains(room.Members, userObjectID),
+			MembersCount: len(room.Members),
+			IsMember:     !userObjectID.IsZero() && slices.Contains(room.Members, userObjectID),
 		}
 
 		rooms = append(rooms, roomResponse)
@@ -596,6 +600,7 @@ func (h *RoomHandler) GetMyRooms(c *gin.Context) {
 			Description: room.Description,
 			Type:        room.Type,
 			Picture:     room.Picture,
+			IsAdmin:     slices.Contains(room.Admins, userObjectID),
 			LastMessage: nil,
 		}
 
@@ -725,6 +730,38 @@ func (h *RoomHandler) LeaveRoom(c *gin.Context) {
 		"userId": userObjectID,
 	})
 	h.RedisService.RemoveUserFromRoom(userObjectID.Hex(), roomObjectID.Hex())
+
+	c.JSON(http.StatusOK, gin.H{})
+}
+
+func (h *RoomHandler) KickMember(c *gin.Context) {
+	roomID := c.Param("id")
+	roomObjectID, err := bson.ObjectIDFromHex(roomID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid room ID"})
+		return
+	}
+
+	memberID := c.Param("memberId")
+	memberObjectID, err := bson.ObjectIDFromHex(memberID)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "Invalid member ID"})
+		return
+	}
+
+	user, err := h.AuthService.GetUserByID(memberObjectID)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to get user info"})
+		return
+	}
+
+	h.RedisService.Publish("chat", "room.kick", bson.M{
+		"id":      roomObjectID,
+		"adminId": user.ID,
+		"userId":  memberObjectID,
+	})
+	h.RedisService.RemoveUserFromRoom(memberObjectID.Hex(), roomObjectID.Hex())
+	h.ChatService.KickUser(h.ChatService.GetClient(memberObjectID.Hex()), roomObjectID.Hex())
 
 	c.JSON(http.StatusOK, gin.H{})
 }

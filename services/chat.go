@@ -12,10 +12,11 @@ import (
 	"sync"
 	"time"
 
-	"piscord-backend/models"
-
+	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"go.mongodb.org/mongo-driver/v2/bson"
+
+	"piscord-backend/models"
 )
 
 type Client struct {
@@ -189,6 +190,10 @@ func (cs *ChatService) LeaveRoom(client *Client, roomID string) {
 	cs.leaveRoomInternal(client, roomID)
 }
 
+func (cs *ChatService) KickUser(client *Client, roomID string) {
+	cs.kickUserInternal(client, roomID)
+}
+
 func (cs *ChatService) GetUserCurrentRoom(client *Client) string {
 	cs.Hub.mutex.RLock()
 	defer cs.Hub.mutex.RUnlock()
@@ -290,11 +295,28 @@ func (cs *ChatService) EditMessage(client *Client, messageID, content string) er
 		return err
 	}
 
-	return cs.RedisService.Publish("chat", "message.update", map[string]any{
-		"id":        messageObjectID,
-		"userId":    userObjectID,
-		"content":   content,
-		"updatedAt": time.Now(),
+	return cs.RedisService.Publish("chat", "message.update", models.MessageUpdate{
+		ID:        messageObjectID,
+		UserID:    userObjectID,
+		Content:   content,
+		UpdatedAt: time.Now(),
+	})
+}
+
+func (cs *ChatService) DeleteMessage(client *Client, messageID string) error {
+	userObjectID, err := bson.ObjectIDFromHex(client.UserID)
+	if err != nil {
+		return err
+	}
+
+	messageObjectID, err := bson.ObjectIDFromHex(messageID)
+	if err != nil {
+		return err
+	}
+
+	return cs.RedisService.Publish("chat", "message.delete", models.MessageUpdate{
+		ID:     messageObjectID,
+		UserID: userObjectID,
 	})
 }
 
@@ -435,6 +457,39 @@ func (cs *ChatService) leaveRoomInternal(client *Client, roomID string) {
 	if len(cs.Hub.Rooms[roomID]) > 0 {
 		cs.broadcastToRoom(roomID, cs.marshalResponse(notification))
 	}
+}
+
+func (cs *ChatService) kickUserInternal(client *Client, roomID string) {
+	cs.leaveRoomInternal(client, roomID)
+
+	roomObjectID, err := bson.ObjectIDFromHex(roomID)
+	if err != nil {
+		return
+	}
+
+	room, err := cs.RoomService.GetRoomByID(roomObjectID)
+	if err != nil {
+		return
+	}
+
+	cs.notifyUserLeft(room, client)
+	cs.sendToClient(client, models.WSResponse{
+		Success: true,
+		Type:    "user.kicked",
+		Data: models.Message{
+			ID:      bson.NewObjectID(),
+			Content: "Você foi expulso da sala.",
+			Author: models.UserSummary{
+				ID:       room.ID,
+				Username: room.Name,
+				Picture:  room.Picture,
+			},
+			FileURL:   "",
+			IsDeleted: false,
+			RoomID:    roomObjectID,
+			CreatedAt: time.Now(),
+		},
+	})
 }
 
 func (cs *ChatService) notifyUserLeft(room *models.Room, client *Client) error {
@@ -767,6 +822,55 @@ func (cs *ChatService) sendToClient(client *Client, response models.WSResponse) 
 			cs.Hub.Unregister <- cl
 		}(client)
 	}
+}
+
+func (cs *ChatService) GetClient(userHex string) *Client {
+	cs.Hub.mutex.RLock()
+	if client, ok := cs.Hub.Clients[userHex]; ok {
+		cs.Hub.mutex.RUnlock()
+		return client
+	}
+	cs.Hub.mutex.RUnlock()
+
+	var user models.User
+	err := cs.RedisService.GetCachedUser(userHex, &user)
+	if err != nil {
+		// Not in Redis, try Mongo
+		userObjectID, err := bson.ObjectIDFromHex(userHex)
+		if err != nil {
+			log.Printf("Invalid user ID format: %v", err)
+			return nil
+		}
+
+		err = cs.MongoService.GetCollection("users").FindOne(context.Background(), bson.M{"_id": userObjectID}).Decode(&user)
+		if err != nil {
+			log.Printf("User not found in Mongo: %v", err)
+			return nil
+		}
+
+		// Cache in Redis
+		go func() {
+			if err := cs.RedisService.CacheUserProfile(userHex, user); err != nil {
+				log.Printf("Failed to cache user profile: %v", err)
+			}
+		}()
+	}
+
+	client := &Client{
+		ID:       uuid.New().String(),
+		UserID:   userHex,
+		Username: user.Username,
+		Picture:  user.Picture,
+		Conn:     nil, // No connection for offline/cached clients
+		Send:     make(chan []byte, 256),
+		Rooms:    make(map[string]bool),
+	}
+
+	cs.Hub.mutex.Lock()
+	cs.Hub.Clients[userHex] = client
+	cs.Hub.mutex.Unlock()
+
+	return client
 }
 
 func (cs *ChatService) getClientSnapshot(userHex string) *Client {

@@ -78,6 +78,7 @@ func main() {
 		rooms.GET("/direct/:id", roomHandler.GetDirectRoom)
 		rooms.POST("/:id/join", roomHandler.JoinRoom)
 		rooms.POST("/:id/leave", roomHandler.LeaveRoom)
+		rooms.POST("/:id/kick/:memberId", roomHandler.KickMember)
 		rooms.GET("/:id/messages", roomHandler.GetMessages)
 	}
 
